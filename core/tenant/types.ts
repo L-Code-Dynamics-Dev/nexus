@@ -7,7 +7,20 @@
 // (Shoptet/Shopify) přímo — jen přes Tenant.platform jako string klíč do
 // Connector Layer (§15: "Core nesmí obsahovat if ERP === ...").
 
-import type { CanonicalEntity, EntityId, ISODateTime, TenantId } from '../canonical/types.js';
+// DRAFT-v1 canonical types byly archivovány (core/canonical/DRAFT-v1-types.ts.bak)
+// při zavedení core/canonical/CANONICAL-MODEL-CONTRACT.md — nová struktura
+// entities/rules/states/projections čeká na návrh dle kontraktu (viz TBD sekce).
+// Dočasně definováno lokálně, než vznikne core/canonical/entities/base.ts.
+export type TenantId = string;
+export type EntityId = string;
+export type ISODateTime = string;
+
+export interface CanonicalEntity {
+    readonly id: EntityId;
+    readonly tenantId: TenantId;
+    readonly createdAt: ISODateTime;
+    readonly updatedAt: ISODateTime;
+}
 
 export type TenantStatus = 'ACTIVE' | 'SUSPENDED' | 'UNINSTALLED';
 export type PlanTier = 'STARTER' | 'GROWTH' | 'ENTERPRISE' | 'CUSTOM';
