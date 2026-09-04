@@ -21,15 +21,30 @@ export interface PricingRuleResult {
  * DiscountLimitPolicy (Product->Brand->Category), RoundingPolicy,
  * Decimal aritmetika -- to vše je LEGACY, nemigrováno, jen obaleno.
  */
+/** Legacy `PricingResult` shape (core/interfaces.ts v connectors/pricing-engine/legacy) -- jen ta pole, co adapter potřebuje. */
+export interface LegacyPricingResult {
+    finalPrice: Decimal;
+    appliedRules: { rule: string; metadata?: string }[];
+    rejected: boolean;
+    rejectReason?: string;
+}
+
+/** Legacy `PricingInput` shape -- jen ta pole, co canonical vstup umí dodat. */
+export interface LegacyPricingInput {
+    sku: string;
+    basePrice: Decimal;
+    salePrice?: Decimal;
+    productMaxDiscount?: Decimal;
+    customerTier?: string;
+    allowLoyaltyDiscount?: boolean;
+    manufacturer?: string;
+    category?: string;
+}
+
 export class PricingAdapter implements Rule<PricingComputationInput, PricingRuleResult> {
     constructor(
         public readonly context: RuleContext,
-        private readonly legacyCalculatePrice: (input: {
-            sku: string;
-            basePrice: Decimal;
-            salePrice?: Decimal;
-            productMaxDiscount?: Decimal;
-        }) => { finalPrice: Decimal; appliedRules: { rule: string }[]; rejected: boolean; rejectReason?: string }
+        private readonly legacyCalculatePrice: (input: LegacyPricingInput) => LegacyPricingResult
     ) {}
 
     evaluate(input: PricingComputationInput): PricingRuleResult {
@@ -40,6 +55,10 @@ export class PricingAdapter implements Rule<PricingComputationInput, PricingRule
             productMaxDiscount: input.productMaxDiscount !== undefined
                 ? new Decimal(input.productMaxDiscount)
                 : undefined,
+            customerTier: input.customerTier,
+            allowLoyaltyDiscount: input.allowLoyaltyDiscount,
+            manufacturer: input.manufacturer,
+            category: input.category,
         });
 
         return {

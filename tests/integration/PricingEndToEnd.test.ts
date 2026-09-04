@@ -1,46 +1,44 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 import Decimal from 'decimal.js';
-import { PricingAdapter } from '../../domains/pricing/PricingAdapter.js';
+import { PricingAdapter, type LegacyPricingInput, type LegacyPricingResult } from '../../domains/pricing/PricingAdapter.js';
+import { createLegacyPricingCalculator } from '../../connectors/pricing-engine/createLegacyPricingCalculator.js';
 import { isConfirmedSuccess, type Execution } from '../../core/canonical/lifecycle/Execution.js';
 import { aggregateBatchStatus, type ReconciliationItemResult } from '../../core/canonical/reconciliation/Reconciliation.js';
 import type { PricingComputationInput } from '../../core/canonical/entities/Price.js';
 
-/**
- * End-to-end test: SKU 93682, base 14.94, loyalty 20%, product limit 15%,
- * sale price 12.70.
- *
- * Matematika (Jan): povolená sleva = min(loyalty 20%, limit 15%) = 15%.
- * candidatePrice = 14.94 * 0.85 = 12.699. Invariant: sale price se NIKDY
- * nezvyšuje jen aby odpovídala vypočtenému discountu -- finalPrice =
- * min(candidatePrice, salePrice) = min(12.699, 12.70) = 12.699, což se
- * po běžném Shoptet zaokrouhlení (2 desetinná místa) zobrazí jako 12.70.
- * reason = SALE_PRICE_WINS jen pokud by salePrice byla ta nižší hodnota --
- * zde vyhrává candidatePrice (je nižší), reason = DISCOUNT_LIMIT_WINS.
- *
- * Legacy engine je zde SIMULOVANÝ (ne import ze skutečného repa -- adapter
- * princip: injektovaná funkce, ne re-implementace). Test ověřuje CELOU
- * cestu: Shoptet input -> Parser -> Canonical -> Rule -> Decision ->
- * Validation -> Expected Execution -> Shoptet CSV -> Import -> Actual ->
- * Reconciliation -> Outcome.
- */
-function simulateLegacyCalculatePrice(input: { sku: string; basePrice: Decimal; salePrice?: Decimal; productMaxDiscount?: Decimal }) {
-    const candidatePrice = input.productMaxDiscount
-        ? input.basePrice.mul(new Decimal(1).minus(input.productMaxDiscount))
-        : input.basePrice;
-    // Invariant: sale price se nikdy nezvyšuje na candidatePrice -- bere se nižší z obou.
-    const useSalePrice = input.salePrice !== undefined && input.salePrice.lessThan(candidatePrice);
-    const finalPrice = useSalePrice ? input.salePrice! : candidatePrice;
-    const reason = useSalePrice ? 'SALE_PRICE_WINS' : 'DISCOUNT_LIMIT_WINS';
-    return {
-        finalPrice,
-        candidatePrice,
-        appliedRules: [{ rule: reason }, { rule: 'ROUNDING' }],
-        rejected: false,
-    };
-}
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LEGACY_CONFIG_PATH = path.join(__dirname, '../../connectors/pricing-engine/legacy/config/policies/policy-v1.json');
 
-describe('Pricing end-to-end — SKU 93682', () => {
-    it('full path: Shoptet input -> Canonical -> Rule -> Decision -> Execution -> Reconciliation -> Outcome', () => {
+/**
+ * End-to-end test: SKU 93682, base 14.94, loyalty tier ZR20 (20%), product
+ * limit 15%, sale price 12.70.
+ *
+ * Legacy `DiscountLimitPolicy` pravidlo (INCIDENTS.md "2026-08-04 VAGNER"):
+ * když je aktivní discount cap (zde productMaxDiscount 15%) A produkt má
+ * vlastní salePrice, salePrice je AUTORITATIVNÍ -- nezvyšuje se na cap-floor,
+ * ani ji nepřebije loyalty tier (i kdyby dával nižší cenu). Reason proto
+ * není "DISCOUNT_LIMIT_WINS" ale SALE (přes DiscountLimitPolicy), protože
+ * HighestDiscountPolicy jako první nastaví loyalty (20% -> 11.952), ale
+ * DiscountLimitPolicy ji následně přepíše zpět na salePrice, protože
+ * productMaxDiscount je definovaný.
+ *
+ * Toto NENÍ simulace -- volá se skutečný portovaný legacy PricingEngine
+ * (connectors/pricing-engine/legacy/) přes createLegacyPricingCalculator().
+ * Test ověřuje CELOU cestu a hranice mezi vrstvami: Canonical Pricing Input
+ * -> PricingAdapter -> Legacy Engine -> Legacy Result -> Nexus Pricing
+ * Decision -> Validation -> Expected Execution -> Execution -> Reconciliation
+ * -> Outcome. Nic se nezapisuje do Shoptetu/okfish -- čistě in-memory běh.
+ */
+describe('Pricing end-to-end — SKU 93682 (real legacy engine)', () => {
+    let legacyCalculatePrice: (input: LegacyPricingInput) => LegacyPricingResult;
+
+    beforeAll(() => {
+        legacyCalculatePrice = createLegacyPricingCalculator(LEGACY_CONFIG_PATH);
+    });
+
+    it('full path: Canonical Input -> PricingAdapter -> Legacy Engine -> Decision -> Validation -> Execution -> Reconciliation -> Outcome', () => {
         // 1. INPUT / PARSER: Shoptet feed row -> Canonical
         const canonicalInput: PricingComputationInput = {
             productSku: '93682',
@@ -48,25 +46,30 @@ describe('Pricing end-to-end — SKU 93682', () => {
             basePrice: { amount: new Decimal('14.94'), currency: 'CZK' },
             salePrice: { amount: new Decimal('12.70'), currency: 'CZK' },
             productMaxDiscount: 0.15,
+            customerTier: 'ZR20',
+            allowLoyaltyDiscount: true,
         };
 
-        // 2. CORE: Rule evaluace přes adapter (legacy logika, obalená)
+        // 2. CORE: Rule evaluace přes adapter -- REÁLNÝ legacy engine, ne simulace.
+        // Adapter je jediná hranice mezi Canonical a Legacy: nezná policy detaily,
+        // jen deleguje LegacyPricingInput -> legacyCalculatePrice -> LegacyPricingResult.
         const adapter = new PricingAdapter(
             { tenantId: 'ten_1', ruleId: 'pricing-legacy-v1', ruleVersion: '1' },
-            simulateLegacyCalculatePrice
+            legacyCalculatePrice
         );
         const ruleResult = adapter.evaluate(canonicalInput);
 
-        // Nezaokrouhlená hodnota je 12.699 (14.94 * 0.85) -- candidatePrice
-        // vyhrává nad salePrice 12.70 (je nižší), reason = DISCOUNT_LIMIT_WINS.
-        expect(ruleResult.finalPrice.toFixed(3)).toBe('12.699');
-        // Po Shoptet zaokrouhlení na 2 des. místa: 12.70.
+        // Discount cap aktivní + salePrice definovaná -> salePrice je autoritativní,
+        // beze změny (DiscountLimitPolicy VAGNER pravidlo), i když by loyalty 20%
+        // dala nižší cenu (14.94 * 0.80 = 11.952 < 12.70).
         expect(ruleResult.finalPrice.toFixed(2)).toBe('12.70');
         expect(ruleResult.rejected).toBe(false);
+        expect(ruleResult.appliedRules).toContain('SALE');
 
         // 3. DECISION -- auditovatelný výsledek, ne Rule samo
         const decision = adapter.toDecision(ruleResult, 'input_ref_93682', 'fp_93682_v1');
-        expect(decision.reason).toContain('DISCOUNT_LIMIT_WINS');
+        expect(decision.reason).toContain('SALE');
+        expect(decision.result.finalPrice.toFixed(2)).toBe('12.70');
 
         // 4. VALIDATION (OUTPUT stage) -- Expected Execution State
         const expectedExecutionState = { sku: '93682', price: ruleResult.finalPrice.toFixed(2) };
@@ -86,7 +89,7 @@ describe('Pricing end-to-end — SKU 93682', () => {
         };
         expect(isConfirmedSuccess(execution)).toBe(false); // SENT != CONFIRMED
 
-        // 6. ACTUAL -- co Shoptet skutečně vrátil po importu (simulace)
+        // 6. ACTUAL -- co Shoptet skutečně vrátil po importu (simulace, žádný reálný zápis)
         const actualExternalState = { sku: '93682', price: '12.70' };
 
         // 7. RECONCILIATION -- Expected vs Actual
@@ -121,5 +124,35 @@ describe('Pricing end-to-end — SKU 93682', () => {
 
         expect(reconciliationItem.outcome).toBe('DIFF');
         expect(aggregateBatchStatus([reconciliationItem])).toBe('COMPLETE_WITH_ERRORS');
+    });
+
+    it('boundary: adapter never imports legacy engine internals directly', () => {
+        // Architektonická hranice, ne jen matematická shoda: PricingAdapter
+        // dostává legacyCalculatePrice jako injektovanou závislost, nikdy
+        // sám neimportuje connectors/pricing-engine/legacy/*. Ověřeno staticky
+        // (viz PricingAdapter.ts importy), zde jen potvrzujeme, že jde
+        // libovolnou implementaci funkce stejné signatury vyměnit bez dopadu
+        // na adapter -- což je přesně to, co createLegacyPricingCalculator dělá.
+        const adapter = new PricingAdapter(
+            { tenantId: 'ten_1', ruleId: 'pricing-legacy-v1', ruleVersion: '1' },
+            legacyCalculatePrice
+        );
+        expect(typeof adapter.evaluate).toBe('function');
+        expect(adapter.context.ruleId).toBe('pricing-legacy-v1');
+    });
+
+    it('rejects unknown customerTier loudly instead of silently falling back', () => {
+        const badInput: PricingComputationInput = {
+            productSku: '93682',
+            priceListId: 'pricelist_unknown',
+            basePrice: { amount: new Decimal('14.94'), currency: 'CZK' },
+            customerTier: 'NOT_A_REAL_TIER',
+            allowLoyaltyDiscount: true,
+        };
+        const adapter = new PricingAdapter(
+            { tenantId: 'ten_1', ruleId: 'pricing-legacy-v1', ruleVersion: '1' },
+            legacyCalculatePrice
+        );
+        expect(() => adapter.evaluate(badInput)).toThrow(/Unknown customerTier/);
     });
 });

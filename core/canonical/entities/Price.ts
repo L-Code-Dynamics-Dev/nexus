@@ -36,6 +36,16 @@ export interface PricingComputationInput {
      */
     purchasePrice?: Money;
     productMaxDiscount?: number;
+    /**
+     * Legacy `PricingInput.customerTier` -- dnes 1:1 s `tenantScopedTierKey`
+     * na PriceList (hardcoded TIER_PRICELIST_MAP v legacy). Zůstává string,
+     * ne union, protože Nexus nesmí zadrátovat konkrétní tenant tiery do
+     * core typu (viz PriceList komentář výše).
+     */
+    customerTier?: string;
+    allowLoyaltyDiscount?: boolean;
+    manufacturer?: string;
+    category?: string;
 }
 
 /**
