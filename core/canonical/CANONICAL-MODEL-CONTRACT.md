@@ -9,8 +9,9 @@ Toto NENÍ types.ts. Je to smlouva, kterou `entities/`, `rules/`, `states/`, `pr
 **Test**: má vlastní identitu (ID nezávislé na výpočtu) a lifecycle (přechází mezi stavy v čase)?
 
 - **ENTITY** — ano na obojí. Customer, Product, Order, PurchaseOrder, Supplier, RiskGraphNode.
-- **RULE** — vypočítává/rozhoduje, ID je odvozené od subjektu (product code), ne vlastní. Promotion, DiscountLimitPolicy, RiskDecision logika.
-- **PROJECTION** — odvozený pohled, přepočítávaný, nikdy vlastní perzistovaný stav. inStock, AvailabilityStatus, canonicalStatus (dokud není zapsán).
+- **RULE** — vypočítává/rozhoduje, ID je odvozené od subjektu (product code), ne vlastní. Promotion, DiscountLimitPolicy, PricingRule, RiskRule.
+- **DECISION** — výsledek Rule evaluace, NENÍ Rule samotné. `RiskDecision`, `PricingResult`. Má vlastní ID a je perzistovaný výstup, ale nevzniká mutací — vzniká z `RiskRule → RiskEvaluation → RiskDecision → Action → Outcome`.
+- **PROJECTION** — čistě odvozený pohled, přepočítávaný, NIKDY vlastní perzistovaný stav. inStock, AvailabilityStatus. Přestává být Projection ve chvíli, kdy se stane perzistovaným Canonical State (viz §4 — canonicalStatus, jednou zapsaný, je STATE entity, ne Projection).
 - **STATE** — hodnota v čase, patřící entitě, ale sama netvoří vlastní identitu. External/Canonical/Derived/Execution/Reconciled.
 
 Žádný modul nesmí definovat Entity tam, kde audit potvrdil Rule nebo Projection (viz Synthesis §1, §6).
@@ -44,6 +45,9 @@ Expected Execution State -- co by mělo nastat po zápisu
 Actual External State   -- co externí systém skutečně má PO zápisu
       ↓ reconciliation
 Reconciliation           -- porovnání Expected vs Actual, DIFF, resolution
+      ↓
+Outcome                  -- uzavřený zápis do outcome-learning smyčky (SafeOrder/Pricing
+                             vzor), vstup pro budoucí Decision evaluace
 ```
 
 **Tvrdé pravidlo** (Synthesis §4): Canonical State se NESMÍ vytvořit pouhým přejmenováním External State. Order.canonicalStatus je navrhovaný nezávisle na Shoptet status.id/name, i když se to zdá pohodlnější zkratka.
@@ -86,7 +90,9 @@ Validation Framework (5-stage: INPUT→PARSER→CORE→OUTPUT→POST/OUTCOME) se
 
 **Migration** (existující, ověřený kód k přenosu): Pricing Engine core, SafeOrder risk-engine/calibration (s oprava feedback loop), AIE ProcurementEngine/AvailabilityEngine (s oprava write-back), GOLIÁŠ connector vzor, Omega hash triáda.
 
-**New-Build** (nula legacy kódu, potvrzeno): Invoice, Warehouse, QuantityTier, PromoGroup, Campaign, CampaignPlacement, Creative, Billing/Marketing/B2B domény, Order.canonicalStatus (samo o sobě).
+**New-Build** (nula legacy kódu, potvrzeno): Invoice, Warehouse, PromoGroup, Campaign, CampaignPlacement, Creative, Billing/Marketing/B2B domény, Order.canonicalStatus (samo o sobě).
+
+**QuantityTier — NOT CONFIRMED, ne New-Build.** Audit v `Price-PriceList-QuantityTier.md` potvrdil jen `minimumAmount`/`maximumAmount` jako produktová/exportní pole a `applyQuantityDiscount`/`applyVolumeDiscount` jako boolean flagy — **nepotvrdil ani nevyvrátil** skutečnou quantity→price výpočetní logiku (např. `1–9 ks → 100 Kč, 10–49 ks → 90 Kč, 50+ ks → 80 Kč`) kdekoli v Pricing Engine. Pokud taková logika existuje jinde v Pricing Engine (nebylo dosud dohledáno v konkrétním kódu/testu/kontraktu), je to Migration kandidát. Pokud existují jen flagy bez výpočtu, je to New-Build. **Nerozhodovat, dokud se nedohledá konkrétní zdroj — nevymýšlet business logiku z existence flagu.**
 
 ## 10. Explicit TBDs (nerozhodnuto, čeká na další audit nebo rozhodnutí)
 
@@ -94,6 +100,7 @@ Validation Framework (5-stage: INPUT→PARSER→CORE→OUTPUT→POST/OUTCOME) se
 - Discount limits: vlastnost Product, nebo samostatná Rule/RuleVersion?
 - `CustomerOrderLine.ownStockQuantity` zdroj — totéž jako Shoptet `stock`?
 - PriceList: 1:1 loyalty tier navždy, nebo nezávislá B2B dimenze?
+- QuantityTier: dohledat, jestli v Pricing Engine existuje konkrétní quantity→price výpočetní kód (ne jen flagy) — determinuje Migration vs New-Build.
 - PromoGroup: čistý Rule, nebo potřebuje vlastní Entity lifecycle?
 
 ---
