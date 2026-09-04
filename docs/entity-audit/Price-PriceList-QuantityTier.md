@@ -75,6 +75,25 @@ QuantityTier           -- ZCELA NEW BUILD, žádný legacy vzor k převzetí,
                            kromě boolean flagů co signalizují "povoleno"
 ```
 
+## FORENZNÍ DOŘEŠENÍ: QuantityTier — definitivní verdikt
+
+Na Janovu žádost dohledán přesný zdroj `minimumAmount`/`maximumAmount`/`applyQuantityDiscount`/`applyVolumeDiscount` (`cloudflare-worker/src/feed-generator.ts:67-73`):
+
+```ts
+applyVolumeDiscount: toBool(row['applyVolumeDiscount']),
+applyQuantityDiscount: toBool(row['applyQuantityDiscount']),
+...
+minimalAmount: parseCommaNumber(row['minimumAmount']),
+maximalAmount: parseCommaNumber(row['maximumAmount']),
+```
+
+**Toto je čistý pass-through** — hodnoty se čtou z master feed CSV řádku (`row[...]`) a rovnou zapisují do generovaného Shoptet XML feedu (`buildPricelistXmlShared`). **Pricing Engine kód tato pole nikde nečte zpátky, nevětví se podle nich, ani nepočítá výsledek.** `src/policies/`, `src/core/`, `cloudflare-worker/src/engine/` (hlavní výpočetní vrstvy) — nula výskytů `quantity` v souvislosti s cenou.
+
+Navíc potvrzeno v `shoptet_openapi.json`: `quantityDiscount`, `quantityDiscountTargetingResponse`, `quantityDiscountSettingsResponse`, `quantityDiscountSnapshot` **existují jako Shoptet API schémata** — quantity discount je **nativní Shoptet funkce**, kterou Pricing Engine jen "krmí" daty (min/max množství, zapnuto/vypnuto), ale výpočet samotné ceny podle množství provádí **Shoptet**, ne Nexus/Pricing Engine.
+
+### DEFINITIVNÍ VERDIKT
+**QuantityTier = NEW BUILD, potvrzeno, ne TBD.** Nejde o to, že by chyběla jen "canonical reprezentace" existující logiky (jako u Product/PurchaseOrder) — chybí **celá výpočetní logika na Nexus straně**, protože tuhle práci dnes dělá Shoptet nativně. Pokud má NEXUS v budoucnu převzít i quantity pricing (aby to fungovalo i na platformách bez nativní podpory, jako Shopify), je to 100% nová stavba podle Shoptet API kontraktu jako referenčního vzoru chování, ne migrace existujícího kódu.
+
 ## OPEN QUESTIONS
 1. Má `PriceList` v Canonical Modelu zůstat 1:1 s loyalty tier, nebo se má od začátku navrhnout jako nezávislá dimenze (umožňující B2B ceník × loyalty tier kombinace)?
 2. `TIER_PRICELIST_MAP` hardcoded mapování — stejný multi-tenant problém jako `LOW_STOCK_THRESHOLD`. Řešit společně jako jeden vzor "tenant-scoped konfigurace nahrazující hardcoded konstanty" napříč Pricing i Availability?

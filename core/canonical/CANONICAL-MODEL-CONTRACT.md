@@ -92,7 +92,18 @@ Validation Framework (5-stage: INPUT→PARSER→CORE→OUTPUT→POST/OUTCOME) se
 
 **New-Build** (nula legacy kódu, potvrzeno): Invoice, Warehouse, PromoGroup, Campaign, CampaignPlacement, Creative, Billing/Marketing/B2B domény, Order.canonicalStatus (samo o sobě).
 
-**QuantityTier — NOT CONFIRMED, ne New-Build.** Audit v `Price-PriceList-QuantityTier.md` potvrdil jen `minimumAmount`/`maximumAmount` jako produktová/exportní pole a `applyQuantityDiscount`/`applyVolumeDiscount` jako boolean flagy — **nepotvrdil ani nevyvrátil** skutečnou quantity→price výpočetní logiku (např. `1–9 ks → 100 Kč, 10–49 ks → 90 Kč, 50+ ks → 80 Kč`) kdekoli v Pricing Engine. Pokud taková logika existuje jinde v Pricing Engine (nebylo dosud dohledáno v konkrétním kódu/testu/kontraktu), je to Migration kandidát. Pokud existují jen flagy bez výpočtu, je to New-Build. **Nerozhodovat, dokud se nedohledá konkrétní zdroj — nevymýšlet business logiku z existence flagu.**
+**QuantityTier = NEW BUILD / TBD** (forenzně dohledáno, ne domněnka). Quantity discount calculation NENÍ přítomen v legacy Pricing Engine. Quantity-related pole se jen přenášejí z master feed do Shoptet XML, kde skutečné slevové chování vykonává nativní Shoptet quantity-discount funkce:
+```
+minimumAmount / maximumAmount / applyQuantityDiscount / applyVolumeDiscount
+        │
+        ▼  Source / Product data (master feed CSV)
+        │
+        ▼  Projection / Connector mapping (feed-generator.ts, 1:1 přepis)
+        │
+        ▼  Shoptet native execution (quantityDiscount* schémata v shoptet_openapi.json)
+     QuantityTier
+```
+Pricing Engine tato pole nepočítá, nevyhodnocuje, nevybírá tier, nepočítá výslednou cenu, nečte zpět, nerozhoduje o nároku — je to čistě transportní/projekční vrstva pro tuto Shoptet funkci. **Nexus nesmí předstírat, že přebírá logiku, která v Pricing Engine nikdy neexistovala.** Pokud NEXUS bude chtít vlastní quantity pricing (nezávislý na nativní Shoptet funkci, potřebný např. pro Shopify), je to nová business capability, ne migrace. Detail: `docs/entity-audit/Price-PriceList-QuantityTier.md`, sekce "FORENZNÍ DOŘEŠENÍ".
 
 ## 10. Explicit TBDs (nerozhodnuto, čeká na další audit nebo rozhodnutí)
 
@@ -100,7 +111,7 @@ Validation Framework (5-stage: INPUT→PARSER→CORE→OUTPUT→POST/OUTCOME) se
 - Discount limits: vlastnost Product, nebo samostatná Rule/RuleVersion?
 - `CustomerOrderLine.ownStockQuantity` zdroj — totéž jako Shoptet `stock`?
 - PriceList: 1:1 loyalty tier navždy, nebo nezávislá B2B dimenze?
-- QuantityTier: dohledat, jestli v Pricing Engine existuje konkrétní quantity→price výpočetní kód (ne jen flagy) — determinuje Migration vs New-Build.
+- ~~QuantityTier: dohledat...~~ **VYŘEŠENO** — New-Build, potvrzeno (viz §9 výše).
 - PromoGroup: čistý Rule, nebo potřebuje vlastní Entity lifecycle?
 
 ---
