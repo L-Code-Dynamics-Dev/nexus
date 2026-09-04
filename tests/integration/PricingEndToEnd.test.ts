@@ -6,12 +6,16 @@ import { aggregateBatchStatus, type ReconciliationItemResult } from '../../core/
 import type { PricingComputationInput } from '../../core/canonical/entities/Price.js';
 
 /**
- * End-to-end test: SKU 93682, base 14.94, sale 12.70, loyalty 20%,
- * product limit 15%. Legacy rule (clearance-vs-cap, CORE_LOGIC_AND_
- * VALIDATION.md §1.1 bod 4): aktivní cap + action price přítomna =>
- * action price vyhrává outright, NIKDY floor-clamped nahoru na cap.
- * Loyalty 20% je hlubší než limit 15%, ale sale price (12.70) je
- * hlubší než obojí, takže sale price vyhrává => finalPrice = 12.70.
+ * End-to-end test: SKU 93682, base 14.94, loyalty 20%, product limit 15%,
+ * sale price 12.70.
+ *
+ * Matematika (Jan): povolená sleva = min(loyalty 20%, limit 15%) = 15%.
+ * candidatePrice = 14.94 * 0.85 = 12.699. Invariant: sale price se NIKDY
+ * nezvyšuje jen aby odpovídala vypočtenému discountu -- finalPrice =
+ * min(candidatePrice, salePrice) = min(12.699, 12.70) = 12.699, což se
+ * po běžném Shoptet zaokrouhlení (2 desetinná místa) zobrazí jako 12.70.
+ * reason = SALE_PRICE_WINS jen pokud by salePrice byla ta nižší hodnota --
+ * zde vyhrává candidatePrice (je nižší), reason = DISCOUNT_LIMIT_WINS.
  *
  * Legacy engine je zde SIMULOVANÝ (ne import ze skutečného repa -- adapter
  * princip: injektovaná funkce, ne re-implementace). Test ověřuje CELOU
@@ -20,14 +24,17 @@ import type { PricingComputationInput } from '../../core/canonical/entities/Pric
  * Reconciliation -> Outcome.
  */
 function simulateLegacyCalculatePrice(input: { sku: string; basePrice: Decimal; salePrice?: Decimal; productMaxDiscount?: Decimal }) {
-    const capPrice = input.productMaxDiscount
+    const candidatePrice = input.productMaxDiscount
         ? input.basePrice.mul(new Decimal(1).minus(input.productMaxDiscount))
-        : undefined;
-    // clearance-vs-cap: action price přítomna a cap aktivní -> action price vyhrává outright
-    const finalPrice = input.salePrice ?? capPrice ?? input.basePrice;
+        : input.basePrice;
+    // Invariant: sale price se nikdy nezvyšuje na candidatePrice -- bere se nižší z obou.
+    const useSalePrice = input.salePrice !== undefined && input.salePrice.lessThan(candidatePrice);
+    const finalPrice = useSalePrice ? input.salePrice! : candidatePrice;
+    const reason = useSalePrice ? 'SALE_PRICE_WINS' : 'DISCOUNT_LIMIT_WINS';
     return {
         finalPrice,
-        appliedRules: [{ rule: 'CLEARANCE_VS_CAP' }, { rule: 'ROUNDING' }],
+        candidatePrice,
+        appliedRules: [{ rule: reason }, { rule: 'ROUNDING' }],
         rejected: false,
     };
 }
@@ -50,12 +57,16 @@ describe('Pricing end-to-end — SKU 93682', () => {
         );
         const ruleResult = adapter.evaluate(canonicalInput);
 
+        // Nezaokrouhlená hodnota je 12.699 (14.94 * 0.85) -- candidatePrice
+        // vyhrává nad salePrice 12.70 (je nižší), reason = DISCOUNT_LIMIT_WINS.
+        expect(ruleResult.finalPrice.toFixed(3)).toBe('12.699');
+        // Po Shoptet zaokrouhlení na 2 des. místa: 12.70.
         expect(ruleResult.finalPrice.toFixed(2)).toBe('12.70');
         expect(ruleResult.rejected).toBe(false);
 
         // 3. DECISION -- auditovatelný výsledek, ne Rule samo
         const decision = adapter.toDecision(ruleResult, 'input_ref_93682', 'fp_93682_v1');
-        expect(decision.reason).toContain('CLEARANCE_VS_CAP');
+        expect(decision.reason).toContain('DISCOUNT_LIMIT_WINS');
 
         // 4. VALIDATION (OUTPUT stage) -- Expected Execution State
         const expectedExecutionState = { sku: '93682', price: ruleResult.finalPrice.toFixed(2) };
