@@ -3,13 +3,13 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import Decimal from 'decimal.js';
 import { PricingAdapter, type LegacyPricingInput, type LegacyPricingResult } from '../../domains/pricing/PricingAdapter.js';
-import { createLegacyPricingCalculator } from '../../connectors/pricing-engine/createLegacyPricingCalculator.js';
+import { createNexusPricingCalculator } from '../../domains/pricing/createNexusPricingCalculator.js';
 import { isConfirmedSuccess, type Execution } from '../../core/canonical/lifecycle/Execution.js';
 import { aggregateBatchStatus, type ReconciliationItemResult } from '../../core/canonical/reconciliation/Reconciliation.js';
 import type { PricingComputationInput } from '../../core/canonical/entities/Price.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LEGACY_CONFIG_PATH = path.join(__dirname, '../../connectors/pricing-engine/legacy/config/policies/policy-v1.json');
+const POLICY_CONFIG_PATH = path.join(__dirname, '../../connectors/pricing-engine/legacy/config/policies/policy-v1.json');
 
 /**
  * End-to-end test: SKU 93682, base 14.94, loyalty tier ZR20 (20%), product
@@ -24,21 +24,26 @@ const LEGACY_CONFIG_PATH = path.join(__dirname, '../../connectors/pricing-engine
  * DiscountLimitPolicy ji následně přepíše zpět na salePrice, protože
  * productMaxDiscount je definovaný.
  *
- * Toto NENÍ simulace -- volá se skutečný portovaný legacy PricingEngine
- * (connectors/pricing-engine/legacy/) přes createLegacyPricingCalculator().
- * Test ověřuje CELOU cestu a hranice mezi vrstvami: Canonical Pricing Input
- * -> PricingAdapter -> Legacy Engine -> Legacy Result -> Nexus Pricing
- * Decision -> Validation -> Expected Execution -> Execution -> Reconciliation
- * -> Outcome. Nic se nezapisuje do Shoptetu/okfish -- čistě in-memory běh.
+ * PŘEPNUTO na Nexus Rule chain (MIGRATION_PLAN.md): PricingAdapter teď
+ * volá createNexusPricingCalculator() -- plný migrovaný chain BasePrice ->
+ * HighestDiscount -> DiscountLimit -> Rounding (domains/pricing/), ne
+ * createLegacyPricingCalculator(). Legacy engine zůstává regression oracle
+ * (viz tests/regression/golden-pricing/full-chain-parity.test.ts a
+ * nexus-calculator-parity.test.ts, 70/70 golden kombinací), ale produkční
+ * cesta jde přes Nexus. Test ověřuje CELOU cestu a hranice mezi vrstvami:
+ * Canonical Pricing Input -> PricingAdapter -> Nexus Rule Chain -> Result
+ * -> Decision -> Validation -> Expected Execution -> Execution ->
+ * Reconciliation -> Outcome. Nic se nezapisuje do Shoptetu/okfish -- čistě
+ * in-memory běh.
  */
-describe('Pricing end-to-end — SKU 93682 (real legacy engine)', () => {
-    let legacyCalculatePrice: (input: LegacyPricingInput) => LegacyPricingResult;
+describe('Pricing end-to-end — SKU 93682 (Nexus Rule chain)', () => {
+    let nexusCalculatePrice: (input: LegacyPricingInput) => LegacyPricingResult;
 
     beforeAll(() => {
-        legacyCalculatePrice = createLegacyPricingCalculator(LEGACY_CONFIG_PATH);
+        nexusCalculatePrice = createNexusPricingCalculator(POLICY_CONFIG_PATH);
     });
 
-    it('full path: Canonical Input -> PricingAdapter -> Legacy Engine -> Decision -> Validation -> Execution -> Reconciliation -> Outcome', () => {
+    it('full path: Canonical Input -> PricingAdapter -> Nexus Rule Chain -> Decision -> Validation -> Execution -> Reconciliation -> Outcome', () => {
         // 1. INPUT / PARSER: Shoptet feed row -> Canonical
         const canonicalInput: PricingComputationInput = {
             productSku: '93682',
@@ -50,12 +55,14 @@ describe('Pricing end-to-end — SKU 93682 (real legacy engine)', () => {
             allowLoyaltyDiscount: true,
         };
 
-        // 2. CORE: Rule evaluace přes adapter -- REÁLNÝ legacy engine, ne simulace.
-        // Adapter je jediná hranice mezi Canonical a Legacy: nezná policy detaily,
-        // jen deleguje LegacyPricingInput -> legacyCalculatePrice -> LegacyPricingResult.
+        // 2. CORE: Rule evaluace přes adapter -- REÁLNÝ Nexus Rule chain, ne simulace,
+        // ne legacy. Adapter je jediná hranice mezi Canonical a implementací:
+        // nezná policy detaily, jen deleguje LegacyPricingInput ->
+        // nexusCalculatePrice -> LegacyPricingResult (shape zůstává stejný,
+        // aby PricingAdapter nemusel vědět, kdo výpočet skutečně dělá).
         const adapter = new PricingAdapter(
-            { tenantId: 'ten_1', ruleId: 'pricing-legacy-v1', ruleVersion: '1' },
-            legacyCalculatePrice
+            { tenantId: 'ten_1', ruleId: 'pricing-nexus-v1', ruleVersion: '1' },
+            nexusCalculatePrice
         );
         const ruleResult = adapter.evaluate(canonicalInput);
 
@@ -126,19 +133,21 @@ describe('Pricing end-to-end — SKU 93682 (real legacy engine)', () => {
         expect(aggregateBatchStatus([reconciliationItem])).toBe('COMPLETE_WITH_ERRORS');
     });
 
-    it('boundary: adapter never imports legacy engine internals directly', () => {
+    it('boundary: adapter never imports Nexus Rule implementations directly', () => {
         // Architektonická hranice, ne jen matematická shoda: PricingAdapter
-        // dostává legacyCalculatePrice jako injektovanou závislost, nikdy
-        // sám neimportuje connectors/pricing-engine/legacy/*. Ověřeno staticky
-        // (viz PricingAdapter.ts importy), zde jen potvrzujeme, že jde
-        // libovolnou implementaci funkce stejné signatury vyměnit bez dopadu
-        // na adapter -- což je přesně to, co createLegacyPricingCalculator dělá.
+        // dostává nexusCalculatePrice jako injektovanou závislost, nikdy sám
+        // neimportuje domains/pricing/{BasePriceRule,HighestDiscountRule,...}.
+        // Ověřeno staticky (viz PricingAdapter.ts importy), zde jen
+        // potvrzujeme, že jde libovolnou implementaci funkce stejné
+        // signatury vyměnit bez dopadu na adapter -- což je přesně to, co
+        // createNexusPricingCalculator (a dřív createLegacyPricingCalculator)
+        // dělá.
         const adapter = new PricingAdapter(
-            { tenantId: 'ten_1', ruleId: 'pricing-legacy-v1', ruleVersion: '1' },
-            legacyCalculatePrice
+            { tenantId: 'ten_1', ruleId: 'pricing-nexus-v1', ruleVersion: '1' },
+            nexusCalculatePrice
         );
         expect(typeof adapter.evaluate).toBe('function');
-        expect(adapter.context.ruleId).toBe('pricing-legacy-v1');
+        expect(adapter.context.ruleId).toBe('pricing-nexus-v1');
     });
 
     it('rejects unknown customerTier loudly instead of silently falling back', () => {
@@ -150,8 +159,8 @@ describe('Pricing end-to-end — SKU 93682 (real legacy engine)', () => {
             allowLoyaltyDiscount: true,
         };
         const adapter = new PricingAdapter(
-            { tenantId: 'ten_1', ruleId: 'pricing-legacy-v1', ruleVersion: '1' },
-            legacyCalculatePrice
+            { tenantId: 'ten_1', ruleId: 'pricing-nexus-v1', ruleVersion: '1' },
+            nexusCalculatePrice
         );
         expect(() => adapter.evaluate(badInput)).toThrow(/Unknown customerTier/);
     });
