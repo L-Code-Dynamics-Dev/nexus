@@ -51,12 +51,35 @@ Canonical `Customer` NENÍ jen "sjednotit tři podobné typy". Je to rozhodnutí
 2. Jak se propojí `Customer.id` (Canonical) s `risk_graph_nodes.blind_token`, aniž by se porušila anonymizace, kterou SafeOrder garantuje (blind token je nevratná HMAC, nesmí se dát dekódovat zpět na Customer.id přímo v audit logu)?
 3. `CustomerGroup` (Canonical, ze seznamu zadání) — je to totéž jako Shoptet `customerGroup`, nebo NEXUS koncept navíc?
 
-## DOPLNĚNÍ PO DALŠÍM PRŮCHODU: risk-graph persist vrstva
+## RiskGraphNode — Persistence (rozšířené hledání dokončeno)
 
-- `graph.ts`'s `evaluateContextualRisk()` je **čistá funkce** — nepřistupuje k DB, testy (`tests/unit/risk-graph.test.ts`) jsou tedy legitimně pure-unit, ne skryté mocky (na rozdíl od AIE PurchaseOrder, kde mock skrýval chybějící integraci).
-- **DB perzistence `risk_graph_nodes` nalezena jen jako `DELETE FROM risk_graph_nodes WHERE tenant_id = ?`** v `onboarding-service.ts` (offboarding/reset flow). **Žádný `INSERT`/`UPDATE` nalezen v tomto průchodu prohledaných souborů** (`csv-importer.ts`, `validation/stages/4-risk-policy-validator.ts`).
-- **TBD, ne uzavřeno**: buď (a) persist logika žije v souboru mimo dosud prohledané (repository vrstva SafeOrderu nebyla v tomto auditu mapována stejně důkladně jako AIE `PostgresProcurementRepository`), nebo (b) je to stejná třída mezery jako u AIE PurchaseOrder — vypočítaný graph node se nikde neuloží. **Nerozhoduji mezi (a)/(b) bez dalšího průchodu na SafeOrder repository vrstvu specificky.**
-- Navíc: `GraphNodeType` v `graph.ts` (`'IDENTITY'|'ADDRESS_CLUSTER'|'PAYMENT_FINGERPRINT'|'ORDER'|'OUTCOME'`) **nesedí** s DB CHECK constraintem v migraci (`'IDENTITY'|'ADDRESS_CLUSTER'|'PAYMENT_FINGERPRINT'|'MERCHANT_CLUSTER'`) — stejný vzorec TS/DB nesouladu jako u AIE `PurchaseOrder.status`. Nutno ověřit, který je aktuální/zamýšlený.
+| Oblast | Stav |
+|---|---|
+| `risk_graph_nodes` schema | EXISTS (`migrations/0006_risk_graph_and_outcomes.sql`) |
+| DELETE/reset path | EXISTS (`onboarding-service.ts:162`, offboarding flow) |
+| GraphNode creation/INSERT v `src/` | **EXISTS** — `csv-importer.ts:184`, `INSERT INTO risk_graph_nodes ... ON CONFLICT(tenant_id, blind_token) DO UPDATE SET total_orders = total_orders + 1, ...` (real upsert pattern) |
+| Read path v `src/` | EXISTS — `validation/pipeline.ts:109`, `SELECT ... FROM risk_graph_nodes WHERE tenant_id = ? AND blind_token = ?` (Stage 4, live checkout evaluation čte graph node) |
+| Repository/adapter abstrakce risk-graph | NOT FOUND — SQL je psané přímo v `csv-importer.ts`/`validation/pipeline.ts`, žádný pojmenovaný port/repository vzor (na rozdíl od AIE, kde `PostgresProcurementRepository` alespoň centralizuje SQL) |
+| Alternativní Node/IdentityNode abstrakce | SEARCHED, NOT FOUND |
+| Generic SQL write mimo `csv-importer.ts` | SEARCHED (`src/core/learning/outcome-engine.ts` — 0 výskytů `risk_graph`/`GraphNode`/`INSERT`/`UPDATE`), NOT FOUND |
+| Write path mimo `src/` (scripts, packages, migrations, triggers) | SEARCHED — `packages/dashboard`, `packages/checkout-scripts`: 0 výskytů; DB triggery: 0 nalezeno; `run-okfish-orders-audit.ts` obsahuje jen in-memory mock DB pro backtest simulaci (`db.tables.risk_graph_nodes = []`), NENÍ produkční write path |
+| Tests creating/persisting nodes | `tests/unit/risk-graph.test.ts` testuje jen čistou funkci `evaluateContextualRisk()` s ručně sestavenými `GraphNode` objekty — **NENÍ to persistence test**, nepoužívá DB vůbec |
+| Runtime verification | NOT VERIFIED (žádný integrační test proti reálné DB nalezen) |
+
+### ZJIŠTĚNÍ (opraveno z předchozí, příliš rychlé formulace)
+
+**Write path EXISTUJE** — `csv-importer.ts` má funkční upsert do `risk_graph_nodes`. Moje dřívější tvrzení "stejná třída mezery jako AIE PurchaseOrder" bylo **předčasné a nesprávné** — write path tam skutečně je, jen jsem ho napoprvé nenašel kvůli úzkému hledání (hledal jsem pojmenovanou abstrakci `GraphNodePort`/`upsertNode`, která neexistuje — SQL je psané přímo inline).
+
+**Ale je tu jiný, přesnější a stále platný nález**: upsert do `risk_graph_nodes` je volaný **jen z `csv-importer.ts`** — tedy z **historického/bulk CSV importu** (backtest/onboarding scénář). **V živém checkout evaluation flow (`validation/pipeline.ts`) se graph node jen ČTE (Stage 4), nikde jsem nenašel odpovídající zápis zpátky PO vyhodnocení nové objednávky** (prohledáno `src/core/learning/outcome-engine.ts` a celý `src/core` grep na `risk_graph`/`INSERT`/`UPDATE` mimo `csv-importer.ts` — nula výsledků).
+
+**Přesná formulace nálezu**: Ne "CRITICAL ARCHITECTURAL GAP — DECLARED STORAGE WITHOUT IDENTIFIED WRITE PATH" (write path byl nalezen). Spíš: **"write path existuje pro bulk/historický import, ale nebyl nalezen odpovídající write path pro průběžnou aktualizaci grafu z živého provozu"** — pokud je to potvrzené, znamenalo by to, že risk graph node data zestárnou (nové RTO/úspěšné doručení se nikdy nepropíše zpátky do `total_orders`/`rto_count` po prvním CSV importu). Tohle je stále jen TBD, ne potvrzený bug — je možné, že live write-back se děje asynchronně jinde (např. cron/batch job přes Cloudflare Queue, mimo `src/core`), co jsem v tomto průchodu neprohledal.
+
+**Navíc, samostatně**: `GraphNodeType` v `graph.ts` (`'IDENTITY'|'ADDRESS_CLUSTER'|'PAYMENT_FINGERPRINT'|'ORDER'|'OUTCOME'`) **nesedí** s DB CHECK constraintem v migraci (`'IDENTITY'|'ADDRESS_CLUSTER'|'PAYMENT_FINGERPRINT'|'MERCHANT_CLUSTER'`) — stejný vzorec TS/DB nesouladu jako u AIE `PurchaseOrder.status`. `csv-importer.ts` samo píše natvrdo `'IDENTITY'` do `node_type`, takže tenhle konkrétní nesoulad dnes nezpůsobuje runtime chybu (protože se nikdy nezapisuje `ADDRESS_CLUSTER`/`PAYMENT_FINGERPRINT`/`ORDER`/`OUTCOME` hodnota) — ale je to further evidence stejného vzorce neudržovaných typů napříč TS/DB.
+
+### DALŠÍ DŮKAZNÍ KROK — DOPLNĚNO
+- `src/queue/` a `worker.ts` existují a byly prohledány — **0 výskytů `risk_graph_nodes`/`GraphNode` v žádném z nich**. Žádný queue/worker/cron write-back nalezen.
+- **Závěr, ne TBD**: v celém `~/safeorder-3.0` repu (src, tests, packages, migrations, scripts) existuje přesně **jeden** write path do `risk_graph_nodes` (`csv-importer.ts`, bulk/historický import), a **žádný** identifikovaný write path pro průběžnou aktualizaci z živého checkout provozu. Live evaluace graph node čte, ale výsledek objednávky (úspěšné doručení/RTO) se nikam nezapisuje zpátky.
+- Tohle JE reálný nález k řešení v Nexus Risk Graph modulu — ne kritická architektonická díra (schema bez write path vůbec), ale **chybějící smyčka zpětné vazby** (write-once-at-import, read-forever, never-updated-by-live-outcomes). Ekonomicky relevantní: risk graph by se bez tohoto zpětného zápisu nikdy nezlepšoval/nezhoršoval podle skutečného provozu po prvním importu.
 
 ## ENTITY BOUNDARY (klíčové architektonické rozhodnutí — Jan)
 
