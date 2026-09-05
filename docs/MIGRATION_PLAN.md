@@ -70,9 +70,28 @@ Vybráno jako první proto, že má nejvyšší produkční zralost (1361 commit
 - `tests/unit/Phase6DomainSkeleton.test.ts` — 26 testů (strukturální vztahy + `evaluateTransition()` lifecycle ověření pro všechny 4 stavové osy).
 - `npm run build` čistý, `npm test` 466/466 (`omega-executor-sanity.test.ts` vyžaduje vyšší než default 5s timeout pod aktuální systémovou zátěží stroje, nesouvisí se Fází 6.1 změnou — ověřeno izolovaně s `--testTimeout=15000`, 9/9 zelených).
 
-Marketing (`domains/marketing/`) a samostatná B2B doména (`domains/b2b/`) zůstávají prázdné — Jose rozhodl: B2B je rozšíření Customer, ne vlastní doména; Marketing nebylo v zadání zmíněno jako samostatná kostra.
+Marketing (`domains/marketing/`) a samostatná B2B doména (`domains/b2b/` jako nová business logika mimo BusinessProfile) zůstávají prázdné — Jose rozhodl: B2B je rozšíření Customer, ne vlastní doména; Marketing nebylo v zadání zmíněno jako samostatná kostra.
 
-**Explicitně MIMO SCOPE** (Jose: "Neimplementovat zatím") — neimplementováno, čeká na další zadání: konkrétní promo výpočty (PromoGroup priority tie-break algoritmus), marketingové distribuční kanály, skladové přesuny/rezervace/alokace, automatická fakturace, payment gateway, usage billing, B2B approval workflow, B2B credit limity, retargeting/email/affiliate, jakékoliv Rules/business logika nad těmito entitami.
+**Business Rules (Fáze 6.2) — HOTOVO** (2026-09-05, Josovo zadání "Fáze 6.2 – Business Rules nad existující kostrou", implementováno 3 paralelními forky na nezávislé domény):
+- `domains/campaign/CampaignLifecycleRule.ts` — `evaluateTransition()` + invariant: DRAFT/PAUSED→ACTIVE vyžaduje aspoň jednu PromoGroup.
+- `domains/campaign/PromoGroupPriorityRule.ts` — validace `priority` (konečné, nezáporné číslo) + `resolveConflict()` čistá funkce (nejvyšší priority vyhrává; remíza = `resolved: false`, žádný tichý tie-break).
+- `domains/campaign/CreativeLifecycleRule.ts` — `evaluateTransition()` + invariant: DRAFT→PUBLISHED vyžaduje neprázdný `content`. ARCHIVED terminalita respektována přes existující definici, žádná nová logika.
+- `domains/invoice/InvoiceLifecycleRule.ts` — `evaluateTransition()` + invariant: PENDING→ISSUED vyžaduje neprázdný `orderId`. `omegaDocumentId` nikdy negenerována, jen čtena jako informační poznámka.
+- `domains/warehouse/WarehouseStockLinkRule.ts` — ověří `StockPosition.warehouseId` odkazuje na `Warehouse` se `status === 'ACTIVE'` (čistá funkce, žádné I/O, žádná vazba na Supplier).
+- `domains/billing/SubscriptionLifecycleRule.ts` — `evaluateTransition()` + `planTier` validace proti existujícímu `PlanTier` typu (`core/tenant/types.ts`), žádná duplicitní logika, žádná vazba na Invoice.
+- `domains/b2b/BusinessProfileAccessor.ts` — `getBusinessProfile()`/`isBusinessCustomer()`/`getB2BPricingContext()` jako jediný kontrakt pro čtení B2B dat jinými doménami (místo přímého sahání do `customer.businessProfile`).
+- Testy: `tests/unit/{CampaignRules,InvoiceRules,WarehouseRules,BillingRules,B2BRules}.test.ts` — 61 nových testů (22+11+6+13+9).
+- `npm run build` čistý, `npm test` 527/527 (466 před Fází 6.2 + 61 nových; `omega-executor-sanity.test.ts` ověřen izolovaně s vyšším timeoutem kvůli systémové zátěži stroje, nesouvisí se změnou).
+
+**UNRESOLVED — explicitně neimplementováno, protože nejde jednoznačně odvodit ze zadání** (v komentářích u příslušných souborů):
+1. Campaign: konkrétní odlišné chování ACTIVE vs. PAUSED nad rámec lifecycle přechodů a PromoGroup invariantu — zadání neuvádí konkrétní pravidlo.
+2. PromoGroup: tie-break při shodné nejvyšší `priority` dvou+ skupin pro stejný produkt — `resolveConflict()` vrací `resolved: false`, nevybírá nic naslepo.
+3. Invoice: zda ISSUED vyžaduje i vyplněný `omegaDocumentId` (ne jen `orderId`) — zadání zmiňuje jen `orderId` jako blokující podmínku.
+4. Warehouse: přesná sémantika `StockPosition.warehouseId === undefined` (no-link vs. invalid-link) — zadání neřeší explicitně tenhle případ.
+5. Billing: vztah `Subscription.status` ↔ `TenantPlan.status` (nezávislé osy, nebo odvozené?) — zadání říká jen "respektuj existující model", ne konkrétní synchronizační pravidlo.
+6. B2B: validace obsahu `BusinessProfile` polí (formát company/taxIdentifiers/paymentTerms) — zadání nespecifikuje žádné konkrétní pravidlo, accessor jen čte.
+
+**Explicitně MIMO SCOPE** (Jose: "Neimplementovat zatím") — konkrétní promo výpočty/ceny, marketingové distribuční kanály, skladové přesuny/rezervace/alokace, automatická fakturace, payment gateway, usage billing, B2B approval workflow, B2B credit limity, retargeting/email/affiliate.
 
 ## Co explicitně NEPŘENÁŠET
 
