@@ -49,7 +49,8 @@ Vybráno jako první proto, že má nejvyšší produkční zralost (1361 commit
 
 ### Fáze 4 — Connector Layer V1 (Shoptet no-API)
 - **OLD**: GOLIÁŠ (`~/shoptet-variant-matrix/shoptet/golias.js`) — nativní `cartShared.addToCart` + DOM fallback
-- **OLD**: Omega CSV parser (`~/omega-bridge/src/adapters/shoptet-file/`) + AIE `NoApiCsvAdapter` — **3 nezávislé Shoptet CSV parsery existují, sjednotit do jednoho**
+- **OLD**: Omega CSV parser (`~/omega-bridge/src/adapters/shoptet-file/`) + AIE `NoApiCsvAdapter`
+- **PŘEHODNOCENO 2026-09-05** — původní věta "3 nezávislé Shoptet CSV parsery, sjednotit do jednoho" byla nepřesná: `connectors/shoptet/legacy/cart/golias.js` (GOLIÁŠ) je nativní košík/DOM add-to-cart adapter, ŽÁDNÝ CSV parser vůbec — nepatří do tohoto bodu. Zbylé dva (`connectors/shoptet/legacy/csv/` pro OBJEDNÁVKY, schema-driven s validation gates; `connectors/supplier-csv/legacy/NoApiCsvAdapter.ts` pro DODAVATELE, poziční `split(',')`) parsují zcela odlišná schémata dat (jiné sloupce, jiný delimiter, jiná doména) — sloučení do jednoho parseru by bylo věcně špatně. **Není co migrovat/sjednocovat** — obě zůstávají oddělené, správně specializované na svou doménu dat. Pokud se v budoucnu ukáže potřeba sdíleného delimiter/row-parsing kódu, jde o extrakci společné utility (core/), ne sloučení business logiky.
 - Bod 41 zadání: musí fungovat bez API. Toto je blokující předpoklad pro Fázi 1-3 reálného nasazení (ne jen testů)
 
 ### Fáze 5 — Omega/ERP adapter
