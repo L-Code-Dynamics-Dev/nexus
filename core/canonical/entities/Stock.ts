@@ -26,6 +26,15 @@ export interface StockPosition extends CanonicalEntity {
     readonly productId: EntityId;
     readonly variantId?: EntityId;
 
+    /**
+     * FK na Warehouse.id -- ROZHODNUTO (Jose 2026-09-05, Fáze 6):
+     * Warehouse -> StockPosition přes warehouseId. Volitelné (ne
+     * `readonly`, ne povinné) -- Non-Interference: existující
+     * StockPosition záznamy bez multi-warehouse koncept zůstávají validní,
+     * žádná zpětně nekompatibilní změna stávajícího chování/testů.
+     */
+    warehouseId?: EntityId;
+
     /** Source field, ze Shoptetu. */
     quantity: number;
     /** Source field. Nezávislé na quantity -- purchasable=true i při quantity=0 je validní. */

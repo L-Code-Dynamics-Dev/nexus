@@ -7,6 +7,12 @@
 // domains/safeorder/, NE sem. Guest checkout má RiskIdentity BEZ
 // Customer záznamu -- Customer proto NENÍ primární identita Nexusu,
 // je to jedna z několika identitních projekcí.
+//
+// B2B (Fáze 6, Josovo zadání 2026-09-05): ROZHODNUTO -- B2B -> Customer +
+// existující Pricing/Order model, NENÍ samostatná doména ani druhý pricing
+// engine (Jose: "Dodrž přesně oddělení domén: B2B není druhý pricing
+// engine"). Rozšíření Customer o `isBusinessCustomer`/`companyIdentifier`
+// níže -- žádná nová B2B entita, žádná paralelní cenová logika.
 
 import type { CanonicalEntity, EntityId, ExternalIdentity } from './base.js';
 
@@ -35,6 +41,16 @@ export interface Customer extends CanonicalEntity {
      * domains/safeorder/ jako referenc SMĚREM k Customer.id, ne naopak.
      * Zde záměrně NEDEFINOVÁNO.
      */
+
+    /**
+     * B2B (Fáze 6, ROZHODNUTO Jose 2026-09-05): rozšíření existujícího
+     * Customer, NE nová entita. `false`/`undefined` = běžný B2C zákazník,
+     * beze změny chování -- Non-Interference, žádný existující Customer
+     * záznam se tímto nerozbije.
+     */
+    isBusinessCustomer?: boolean;
+    /** TBD: IČO/DIČ přesný shape (string vs. structured {ico, dic}) -- nerozhodnuto. */
+    companyIdentifier?: string;
 }
 
 /**
@@ -44,4 +60,9 @@ export interface Customer extends CanonicalEntity {
  *   - field-level source of truth pro každé pole nad rámec výše uvedeného
  *   - customerGroupId -- je to totéž jako Shoptet customerGroup, nebo
  *     nezávislý Nexus koncept?
+ *   - B2B (ROZHODNUTO Jose 2026-09-05: Customer + existující Pricing/Order
+ *     model, ne nová doména) -- companyIdentifier přesný shape, jak přesně
+ *     isBusinessCustomer ovlivňuje Pricing chain (žádná paralelní logika,
+ *     ale KTERÝ existující Rule/config přesně čte toto pole) zůstává
+ *     business rule detail mimo scope Fáze 6 kostry.
  */

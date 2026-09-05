@@ -1,11 +1,16 @@
-// Warehouse -- PLACEHOLDER, čistě NEW BUILD (docs/CANONICAL_MODEL_SYNTHESIS.md
-// §13). Fáze 6 (docs/MIGRATION_PLAN.md). Žádný zdrojový systém má vícesklad
-// koncept -- Stock.ts (core/canonical/entities/Stock.ts) dnes reprezentuje
-// jednu agregovanou pozici, ne per-warehouse rozpad. Pokud Nexus bude
-// potřebovat multi-warehouse (více fyzických skladů/dropshipping lokací),
-// je to nová stavba navazující na Stock.ts, ne migrace.
+// Warehouse -- Fáze 6 doménová kostra (docs/MIGRATION_PLAN.md, Josovo
+// zadání 2026-09-05: "Další kroky Fáze 6"). Žádný zdrojový systém má
+// vícesklad koncept -- Stock.ts dnes reprezentuje jednu agregovanou pozici.
 //
-// Tento soubor je jen typová kostra, žádné obchodní rozhodnutí.
+// ROZHODNUTO (Jose 2026-09-05):
+//   - Warehouse -> StockPosition přes `warehouseId` (StockPosition v
+//     Stock.ts rozšířeno o volitelné `warehouseId` pole -- viz Stock.ts).
+//   - Warehouse NENÍ totéž jako Supplier (Procurement doména,
+//     SupplierOffer) -- oddělené koncepty (dodavatel != sklad), viz Jose:
+//     "Dodrž přesně oddělení domén: Warehouse není Supplier". Žádná
+//     vazba/sloučení se Supplier zde neimplementuje.
+//
+// Tento soubor implementuje POUZE základní kontrakt.
 
 import type { CanonicalEntity } from './base.js';
 
@@ -16,9 +21,8 @@ export interface Warehouse extends CanonicalEntity {
 }
 
 /**
- * OPEN QUESTIONS:
- * 1. Vztah k StockPosition (core/canonical/entities/Stock.ts) -- rozšířit
- *    Stock o warehouseId, nebo je Warehouse nezávislá dimenze až později?
- * 2. Je "Supplier" (Procurement doména, SupplierOffer) totéž jako Warehouse,
- *    nebo oddělené koncepty (dodavatel != sklad)?
+ * ROZHODNUTO (Jose 2026-09-05): Warehouse -> StockPosition.warehouseId
+ * (viz Stock.ts), Warehouse != Supplier (oddělené domény, žádná vazba
+ * mezi nimi zde). Zbývající OPEN QUESTION (business rule detail):
+ * 1. Fyzická adresa jako pole, nebo jen logický identifikátor? Nerozhodnuto.
  */

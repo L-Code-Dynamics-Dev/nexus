@@ -1,30 +1,31 @@
-// Campaign / PromoGroup / CampaignPlacement / Creative -- PLACEHOLDER,
-// čistě NEW BUILD (docs/CANONICAL_MODEL_SYNTHESIS.md §7,9: "Campaign |
-// — | — | — | — | — (nic neexistuje)" -- žádný zdrojový systém má
-// jakoukoliv implementaci, potvrzeno napříč všemi audity).
+// Campaign / PromoGroup / CampaignPlacement / Creative -- Fáze 6 doménová
+// kostra (docs/MIGRATION_PLAN.md, Josovo zadání 2026-09-05: "Další kroky
+// Fáze 6"). Čistě NEW BUILD, žádný zdrojový systém neobsahuje kód k migraci.
 //
-// Fáze 6 (docs/MIGRATION_PLAN.md řádek 60-61): "Čistě NEW BUILD. Žádný
-// zdrojový systém neobsahuje kód k migraci." Tento soubor NENÍ business
-// rozhodnutí -- je to jen typová kostra podle Canonical Model kontraktu
-// (CanonicalEntity shape), aby budoucí návrh měl kam navázat. Žádná
-// hodnota/pravidlo zde není domyšlené za obchodní stranu.
+// ROZHODNUTO (Jose 2026-09-05): PromoGroup -> Product (NENÍ PriceList).
+// Vazba je explicitní FK seznam (productIds), ne odvozená z ceníku/tieru --
+// PromoGroup je nezávislá entita na Pricing doméně, viz "Dodrž přesně
+// oddělení domén: PromoGroup není PriceList".
 //
-// DŮLEŽITÉ POUČENÍ (viz docs/design-proposals/QuantityTier-Hecmania.md):
-// stejně jako QuantityTier, i Campaign potřebuje explicitní obchodní
-// rozhodnutí PŘED jakoukoliv Rule/logic implementací -- ne až po ní.
-// Otevřené otázky jsou vyjmenované níže, ne domyšlené.
+// SCOPE (Jose): implementovat POUZE základní kontrakty (typy, entity,
+// vazby, ID, stavové hodnoty) -- žádná neodsouhlasená funkcionalita
+// (email marketing, retargeting, affiliate, schvalovací workflow).
+// Lifecycle states a Placement typy ZŮSTÁVAJÍ TBD (viz Open Questions),
+// Jose zadání je neurčuje explicitně -- ponecháno jako string dokud
+// nepadne konkrétní enum rozhodnutí.
 
 import type { CanonicalEntity, EntityId, ISODateTime } from './base.js';
 
 /**
- * PromoGroup -- seskupení produktů/pravidel pro účely kampaně. Shape
- * záměrně minimální (jen identita + název) -- vztah k Product/PriceList
- * je OTEVŘENÁ OTÁZKA (viz níže), ne rozhodnuto.
+ * PromoGroup -- seskupení produktů pro účely kampaně. ROZHODNUTO: vazba na
+ * Product přes explicitní `productIds` (FK seznam), NENÍ odvozeno z
+ * PriceList/ceníku ani z dynamického pravidla (kategorie/tag) -- to by
+ * bylo přesně smíchání s Pricing doménou, které Jose zakázal.
  */
 export interface PromoGroup extends CanonicalEntity {
     name: string;
-    /** TBD: explicitní seznam SKU, nebo dynamické pravidlo (kategorie/tag)? Nerozhodnuto. */
-    memberProductSkus?: string[];
+    /** FK na Product.id -- explicitní členství, ne odvozené pravidlo. */
+    productIds: EntityId[];
 }
 
 /**
@@ -41,6 +42,8 @@ export interface Campaign extends CanonicalEntity {
     status: string; // TBD -- viz komentář výše, žádná domněnka o hodnotách
     startsAt?: ISODateTime;
     endsAt?: ISODateTime;
+    /** FK na PromoGroup.id -- ROZHODNUTO (Jose): Campaign -> PromoGroup. */
+    promoGroupId: EntityId;
 }
 
 /**
@@ -65,19 +68,21 @@ export interface Creative extends CanonicalEntity {
 }
 
 /**
- * OPEN QUESTIONS (k rozhodnutí PŘED jakoukoliv Rule/logic implementací,
- * ne domýšlet za obchodní stranu):
+ * ROZHODNUTO (Jose 2026-09-05): PromoGroup -> Product, Campaign ->
+ * PromoGroup, Campaign -> Creative -- vazby výše implementovány jako
+ * explicitní FK. Zbývající OPEN QUESTIONS (mimo scope Fáze 6 kostry,
+ * Jose: "nepřidávej žádnou neodsouhlasenou funkcionalitu" -- lifecycle
+ * states, placement enum a content model jsou BUSINESS RULE detaily,
+ * ne struktura kostry, proto zůstávají TBD):
  *
- * 1. Vztah PromoGroup <-> Product/PriceList: je PromoGroup nezávislá
- *    entita (jako navržená QuantityTierGroup hypotéza C), nebo odvozená
- *    z existujícího PriceList konceptu?
- * 2. Campaign lifecycle states: jaké přesně stavy (DRAFT/SCHEDULED/
+ * 1. Campaign lifecycle states: jaké přesně stavy (DRAFT/SCHEDULED/
  *    ACTIVE/ENDED/CANCELLED?) a jaké přechody mezi nimi jsou povolené?
- * 3. CampaignPlacement typy: kde přesně se kampaně mohou zobrazovat
+ * 2. CampaignPlacement typy: kde přesně se kampaně mohou zobrazovat
  *    (závisí na tom, co Shoptet/frontend Connector Layer umožní)?
- * 4. Creative content model: strukturovaný, nebo volný text/asset URL?
- * 5. Kdo campaign vytváří/schvaluje (workflow), a jak se to promítá do
+ * 3. Creative content model: strukturovaný, nebo volný text/asset URL?
+ * 4. Kdo campaign vytváří/schvaluje (workflow), a jak se to promítá do
  *    Decision/Execution vrstvy (SOURCE->DERIVED->DECISION->EXECUTED->
  *    RECONCILED vzor, viz CANONICAL_MODEL_SYNTHESIS.md §8 Promotion
- *    referenční vzor)?
+ *    referenční vzor)? -- explicitně MIMO SCOPE (Jose: "žádné B2B
+ *    schvalování" per bod 5 zadání, analogicky pro Campaign schvalování).
  */

@@ -61,6 +61,19 @@ Vybráno jako první proto, že má nejvyšší produkční zralost (1361 commit
 ### Fáze 6+ — Billing, Marketing, B2B, Campaign, Creative
 **Čistě NEW BUILD.** Žádný zdrojový systém neobsahuje kód k migraci. Postavit až po Fázi 0-5, na hotovém Canonical Model + Connector Layer — jinak vzniknou stejné hardcoded/single-tenant chyby, co řešíme u Pricing Engine dnes.
 
+**Doménová kostra — HOTOVO** (2026-09-05, Josovo zadání "Další kroky Fáze 6"):
+- `core/canonical/entities/Campaign.ts` — `PromoGroup -> Product` (FK `productIds`), `Campaign -> PromoGroup`, `Campaign -> Creative` (existující `campaignId`).
+- `core/canonical/entities/Invoice.ts` — `Invoice -> Order` 1:1 (`orderId`, NE souhrnná N:1 faktura).
+- `core/canonical/entities/Warehouse.ts` + `Stock.ts` — `Warehouse -> StockPosition` přes volitelné `warehouseId` (Non-Interference: existující záznamy beze změny).
+- `core/canonical/entities/Billing.ts` (nový soubor) — `Subscription`/`BillingEvent`, váže se na `Tenant`/`TenantPlan` (core/tenant/types.ts) přes `tenantId`. Explicitně ODDĚLENO od `Invoice.ts`.
+- `core/canonical/entities/Customer.ts` — B2B jako rozšíření (`isBusinessCustomer`/`companyIdentifier`), NENÍ nová doména ani druhý pricing engine.
+- `tests/unit/Phase6DomainSkeleton.test.ts` — 13 testů, ověřují jen strukturu/vztahy (žádné business scénáře).
+- `npm run build` čistý, `npm test` 444/444 (mimo `omega-executor-sanity.test.ts`, flaky pod extrémní systémovou zátěží tohoto stroje v době běhu, nesouvisí se Fází 6 změnou).
+
+Marketing (`domains/marketing/`) a samostatná B2B doména (`domains/b2b/`) zůstávají prázdné — Jose rozhodl: B2B je rozšíření Customer, ne vlastní doména; Marketing nebylo v zadání "Další kroky Fáze 6" zmíněno jako samostatná kostra.
+
+**Explicitně MIMO SCOPE** (Jose bod 5: "Nepřidávej žádnou neodsouhlasenou funkcionalitu") — neimplementováno, čeká na další zadání: automatické workflow faktur, souhrnné faktury, email marketing, retargeting, affiliate, B2B schvalování, vlastní účetnictví, jakékoliv Rules/business logika nad těmito entitami.
+
 ## Co explicitně NEPŘENÁŠET
 
 - `okfish-pricing-engine` hardcoded `SECRET_TOKEN` (aktivní bezpečnostní díra, viz paměť) — NEXUS Connector Layer musí od začátku používat env/secret store
