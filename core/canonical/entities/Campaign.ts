@@ -28,11 +28,31 @@ import type { CanonicalEntity, EntityId, ISODateTime } from './base.js';
 import type { StateAxisDefinition } from '../../state-machine/StateMachine.js';
 
 /**
+ * PromoGroupDiscount -- ROZHODNUTO (Jose 2026-09-05, Fáze 6.5): PromoGroup
+ * nese slevovou hodnotu (typ + %/Kč), aplikovanou na `currentPrice` (cena
+ * PO celém Pricing chainu -- sale/loyalty/discount limits), NIKDY na
+ * `basePrice`. Viz `domains/campaign/PromoGroupDiscountRule.ts` pro
+ * výpočetní logiku a přesné umístění v cenovém modelu.
+ */
+export type PromoGroupDiscountType = 'PERCENTAGE' | 'FIXED_AMOUNT';
+
+export interface PromoGroupDiscount {
+    readonly type: PromoGroupDiscountType;
+    /** PERCENTAGE: 0 <= value < 1 (např. 0.1 = 10%). FIXED_AMOUNT: absolutní částka v měně produktu. Validace v PromoGroupDiscountRule. */
+    readonly value: number;
+}
+
+/**
  * PromoGroup -- seskupení produktů pro účely kampaně. `priority` je
  * POVINNÉ (ne optional) -- Jose: "konflikt více promo skupin se neřeší
  * implicitně, musí existovat explicitní priorita." Produkt může patřit
  * do více PromoGroup současně (M:N), proto se priorita řeší per-group,
  * ne jako vlastnost Product.
+ *
+ * `discount` -- ROZHODNUTO (Jose, Fáze 6.5): "skutečná promo pravidla" =
+ * procentuální/pevná sleva. Optional -- Non-Interference s Fáze 6.0-6.4
+ * kostrou/testy, které PromoGroup bez slevy vytvářely jen pro conflict
+ * resolution testy (priorita/tie-break), ne pro cenový výpočet.
  */
 export interface PromoGroup extends CanonicalEntity {
     name: string;
@@ -40,6 +60,8 @@ export interface PromoGroup extends CanonicalEntity {
     productIds: EntityId[];
     /** Vyšší číslo = vyšší priorita při konfliktu více PromoGroup na stejném produktu. Tie-break algoritmus mimo scope kostry. */
     priority: number;
+    /** Slevová hodnota této skupiny -- viz PromoGroupDiscount výše. Optional (Non-Interference s existující kostrou). */
+    discount?: PromoGroupDiscount;
 }
 
 /**

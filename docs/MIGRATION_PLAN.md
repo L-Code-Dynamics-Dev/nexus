@@ -117,7 +117,21 @@ Testy: 43 nových (Campaign 11, Invoice 8, Warehouse 7, Billing 10, B2B 7).
 
 **Explicitně MIMO SCOPE** (Jose: "zatím vůbec neřešit", nezměněno Fází 6.4) — konkrétní promo výpočet, platební provider, subscription payment flow, B2B schvalování/limity, skladové přesuny, marketingové kanály, TRIAL mapping, PAST_DUE/GRACE_PERIOD jistota.
 
-Cesta 6.0 kostra → 6.1 lifecycle → 6.2 business rules → 6.3 rozhodnutí → 6.4 business flows je uzavřená bez domýšlení na žádném kroku. Další krok čeká na Josovo zadání.
+Cesta 6.0 kostra → 6.1 lifecycle → 6.2 business rules → 6.3 rozhodnutí → 6.4 business flows je uzavřená bez domýšlení na žádném kroku.
+
+**Domain Rules (Fáze 6.5) — Campaign/PromoGroup HOTOVO** (2026-09-05, Josovo zadání "Fáze 6.5 – Domain Rules... Začal bych Campaign + PromoGroup"). PRVNÍ konkrétní business logika, ne jen kompozice/kostra — implementováno JEDNOU sekvenčně (ne paralelní forky, přesné pořadí v cenovém modelu je jeden provázaný celek):
+
+- `core/canonical/entities/Campaign.ts` — `PromoGroup` rozšířena o volitelné `discount: PromoGroupDiscount` (`type: 'PERCENTAGE' | 'FIXED_AMOUNT'`, `value`). Non-Interference: optional pole, existující PromoGroup záznamy/testy beze změny chování.
+- `domains/campaign/PromoGroupDiscountRule.ts` (nový) — implementuje PŘESNÝ Josův architektonický model: `PromoGroup se aplikuje na currentPrice (cena PO Pricing chainu), NIKDY na basePrice`. Kandidátní model, NE řetězení procent — vytvoří promo cenu z vítězné PromoGroup a vrátí **minimum** z `currentPrice` a promo ceny (nikdy tiché zdražení, nikdy sčítání s jinými slevami). Přesná shoda (promoPrice === currentPrice) → zdroj zůstává `CURRENT_PRICE` (deterministické). PERCENTAGE/FIXED_AMOUNT defenzivně ořezány proti záporné ceně (config chyba nesmí projít, i když Jose tuhle konkrétní hranici výslovně nezopakoval — označeno jako defenzivní krok, ne potvrzené pravidlo).
+- `domains/campaign/CampaignFlows.ts` — nová `evaluateCampaignPromoPricingForProduct()` skládá Flow 2 (conflict resolution, Fáze 6.3) + `PromoGroupDiscountRule` (Fáze 6.5) v přesném pořadí, které Jose zadal: "nejdřív se vyřeší konflikt podle priority → createdAt → id... Teprve vítězná PromoGroup vytvoří kandidátní cenu."
+- QuantityTierRule (Fáze 1, design proposal §6 stále nerozhodnut) zůstává **nedotčena** — tato Rule o ní vůbec neví, jen vytváří PromoGroup kandidáta na stejné úrovni cenového modelu (currentPrice). Obecný N-way výběr mezi VÍCE kandidáty (PromoGroup + QuantityTier + budoucí typy najednou) je MIMO SCOPE — Jose zadal jen párové porovnání "currentPrice vs. PromoGroup cena".
+
+Testy: 14 nových (`PromoGroupDiscountRule.test.ts` 9 + `CampaignFlows.test.ts` +5).
+`npm run build` čistý, `npm test` 608/608 (599 hlavní běh + 9 omega-executor izolovaně s vyšším timeoutem kvůli systémové zátěži stroje).
+
+**UNRESOLVED** (defenzivní implementace, ne potvrzené business pravidlo — Jose to explicitně nezopakoval pro tuto konkrétní Rule): horní hranice PERCENTAGE (0 ≤ value < 1) a FIXED_AMOUNT clamp na 0 jsou odvozeny z konvence jiných existujících Rules (DiscountLimitRule/D1 schema), ne z tohoto konkrétního zadání.
+
+**Zbývající Domain Rules (Fáze 6.5 pokračování, JEDNA doména najednou, podle Josova pořadí):** Creative (skutečné použití obsahu/placement) → B2B (obchodní pravidla firemních zákazníků) → Invoice/Omega (skutečný dokladový workflow) → Warehouse (skutečná skladová logika) → Billing/Subscription (skutečný SaaS billing). Každá čeká na explicitní business zadání od Jose před implementací — žádné domýšlení.
 
 ## Co explicitně NEPŘENÁŠET
 

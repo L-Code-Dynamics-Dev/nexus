@@ -5,9 +5,11 @@
 // nová business logika (viz komentáře v CampaignFlows.ts).
 
 import { describe, it, expect } from 'vitest';
+import Decimal from 'decimal.js';
 import {
     resolveCampaignPromoGroupForProduct,
     evaluateCampaignForProduct,
+    evaluateCampaignPromoPricingForProduct,
     publishCreative,
 } from '../../domains/campaign/CampaignFlows.js';
 import type { Campaign, PromoGroup, Creative } from '../../core/canonical/entities/Campaign.js';
@@ -140,6 +142,81 @@ describe('Flow 2 — evaluateCampaignForProduct (Campaign evaluation ACTIVE/PAUS
         const campaign = makeCampaign({ status: 'ENDED' });
         const result = evaluateCampaignForProduct(campaign, [], 'prod_1');
         expect(result.evaluated).toBe(false);
+    });
+});
+
+describe('Flow 5 (Fáze 6.5) — evaluateCampaignPromoPricingForProduct (Campaign/PromoGroup skutečné promo pricing)', () => {
+    it('vítězná PromoGroup s platnou slevou nižší než currentPrice vyhrává jako finální cena', () => {
+        const campaign = makeCampaign({ status: 'ACTIVE', promoGroupIds: ['promo_a'] });
+        const groupA = makePromoGroup({
+            id: 'promo_a',
+            productIds: ['prod_1'],
+            priority: 10,
+            discount: { type: 'PERCENTAGE', value: 0.1 },
+        });
+
+        const result = evaluateCampaignPromoPricingForProduct(campaign, [groupA], 'prod_1', new Decimal('225'), ctx);
+
+        expect(result.conflictResolution.resolved).toBe(true);
+        expect(result.pricing.finalPrice.toString()).toBe('202.5');
+        expect(result.pricing.source).toBe('PROMO_GROUP');
+    });
+
+    it('PAUSED kampaň se nevyhodnocuje -- pricing vrací currentPrice beze změny, žádná PromoGroup se neuplatní', () => {
+        const campaign = makeCampaign({ status: 'PAUSED', promoGroupIds: ['promo_a'] });
+        const groupA = makePromoGroup({
+            id: 'promo_a',
+            productIds: ['prod_1'],
+            discount: { type: 'PERCENTAGE', value: 0.5 }, // i agresivní sleva se neuplatní
+        });
+
+        const result = evaluateCampaignPromoPricingForProduct(campaign, [groupA], 'prod_1', new Decimal('225'), ctx);
+
+        expect(result.conflictResolution.resolved).toBe(false);
+        expect(result.pricing.finalPrice.toString()).toBe('225');
+        expect(result.pricing.source).toBe('CURRENT_PRICE');
+    });
+
+    it('žádná PromoGroup neobsahuje produkt -- pricing vrací currentPrice beze změny', () => {
+        const campaign = makeCampaign({ status: 'ACTIVE', promoGroupIds: ['promo_a'] });
+        const groupA = makePromoGroup({ id: 'promo_a', productIds: ['prod_other'], discount: { type: 'PERCENTAGE', value: 0.2 } });
+
+        const result = evaluateCampaignPromoPricingForProduct(campaign, [groupA], 'prod_1', new Decimal('225'), ctx);
+
+        expect(result.conflictResolution.resolved).toBe(false);
+        expect(result.pricing.finalPrice.toString()).toBe('225');
+    });
+
+    it('konflikt priority se vyřeší PŘED výpočtem ceny -- vítězná skupina (vyšší priority) určuje slevu', () => {
+        const campaign = makeCampaign({ status: 'ACTIVE', promoGroupIds: ['promo_a', 'promo_b'] });
+        const groupA = makePromoGroup({
+            id: 'promo_a', productIds: ['prod_1'], priority: 5,
+            discount: { type: 'PERCENTAGE', value: 0.05 },
+        });
+        const groupB = makePromoGroup({
+            id: 'promo_b', productIds: ['prod_1'], priority: 20,
+            discount: { type: 'PERCENTAGE', value: 0.2 },
+        });
+
+        const result = evaluateCampaignPromoPricingForProduct(campaign, [groupA, groupB], 'prod_1', new Decimal('200'), ctx);
+
+        expect(result.conflictResolution.winner?.id).toBe('promo_b'); // vyšší priority vyhrává
+        expect(result.pricing.finalPrice.toString()).toBe('160'); // 200 * (1 - 0.2), NE 0.05
+    });
+
+    it('currentPrice reprezentuje cenu PO Pricing chainu (např. loyalty sleva) -- PromoGroup se NESČÍTÁ s ní, aplikuje se NA ni', () => {
+        // Scénář: basePrice 250 -> H-KLUB 10% loyalty -> currentPrice 225 (vstup sem).
+        // PromoGroup 10% se aplikuje NA 225, výsledek 202.5 -- NIKDY 250*(1-0.1-0.1)=200.
+        const campaign = makeCampaign({ status: 'ACTIVE', promoGroupIds: ['promo_a'] });
+        const groupA = makePromoGroup({
+            id: 'promo_a', productIds: ['prod_1'],
+            discount: { type: 'PERCENTAGE', value: 0.1 },
+        });
+        const currentPriceAfterLoyalty = new Decimal('225');
+
+        const result = evaluateCampaignPromoPricingForProduct(campaign, [groupA], 'prod_1', currentPriceAfterLoyalty, ctx);
+
+        expect(result.pricing.finalPrice.toString()).toBe('202.5');
     });
 });
 

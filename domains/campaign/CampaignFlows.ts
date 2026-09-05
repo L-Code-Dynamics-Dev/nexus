@@ -19,10 +19,12 @@
 // žádné CampaignPlacement/distribuční rozhodování -- flows zde jen skládají
 // existující Rules a vrací jejich výsledky, nikdy nepočítají nic nového.
 
+import Decimal from 'decimal.js';
 import type { Campaign, PromoGroup, Creative, CreativeLifecycleState } from '../../core/canonical/entities/Campaign.js';
 import { shouldEvaluateCampaign } from './CampaignLifecycleRule.js';
 import { resolveConflict, type PromoGroupConflictResult } from './PromoGroupPriorityRule.js';
 import { CreativeLifecycleRule, type CreativeLifecycleRuleResult } from './CreativeLifecycleRule.js';
+import { PromoGroupDiscountRule, type PromoGroupDiscountRuleResult } from './PromoGroupDiscountRule.js';
 import type { RuleContext } from '../../core/canonical/rules/Rule.js';
 
 /**
@@ -85,6 +87,53 @@ export function evaluateCampaignForProduct(
 
     const resolution = resolveCampaignPromoGroupForProduct(campaign, allPromoGroups, productId);
     return { evaluated: true, ...resolution };
+}
+
+/**
+ * Flow 5 (Fáze 6.5) -- Campaign/PromoGroup skutečné promo pricing. Skládá
+ * Flow 1 (resolveCampaignPromoGroupForProduct, Fáze 6.3 conflict
+ * resolution) s `PromoGroupDiscountRule` (Fáze 6.5 kandidátní cena) --
+ * PŘESNĚ v pořadí, které Jose zadal: "nejdřív se vyřeší konflikt podle
+ * priority -> createdAt -> id... Teprve vítězná PromoGroup vytvoří
+ * kandidátní cenu."
+ *
+ * `currentPrice` je vstup -- cena PO celém Pricing chainu (sale/loyalty/
+ * discount limits), tento flow ji NEPOČÍTÁ, jen ji přebírá jako hotovou
+ * hodnotu z volajícího (Pricing doména zůstává jediným vlastníkem toho
+ * výpočtu, viz PromoGroupDiscountRule.ts hlavička).
+ */
+export interface CampaignPromoPricingResult {
+    readonly campaignId: string;
+    readonly productId: string;
+    readonly conflictResolution: PromoGroupConflictResult;
+    readonly pricing: PromoGroupDiscountRuleResult;
+}
+
+export function evaluateCampaignPromoPricingForProduct(
+    campaign: Pick<Campaign, 'id' | 'status' | 'promoGroupIds'>,
+    allPromoGroups: readonly PromoGroup[],
+    productId: string,
+    currentPrice: Decimal,
+    context: RuleContext
+): CampaignPromoPricingResult {
+    const evaluation = evaluateCampaignForProduct(campaign, allPromoGroups, productId);
+
+    const conflictResolution: PromoGroupConflictResult = evaluation.evaluated
+        ? evaluation
+        : { resolved: false, reason: evaluation.reason, tieBreakApplied: false };
+
+    const discountRule = new PromoGroupDiscountRule(context);
+    const pricing = discountRule.evaluate({
+        currentPrice,
+        winningPromoGroup: conflictResolution.resolved ? conflictResolution.winner : undefined,
+    });
+
+    return {
+        campaignId: campaign.id,
+        productId,
+        conflictResolution,
+        pricing,
+    };
 }
 
 /**
