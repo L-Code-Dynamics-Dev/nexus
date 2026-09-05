@@ -42,9 +42,47 @@ nová infrastrukturní práce, ne migrace tohoto souboru.
 (`fs.readFileSync`) -- I/O. `ingestion/types.ts` jsou jen typy, nic
 k migraci.
 
+## backtest/point-in-time-backtest.ts
+
+Soubor (737 řádků) obsahuje jak čistou logiku, tak I/O orchestraci --
+rozděleno:
+
+- **`calculateMetricSet`, `calculateRocAuc`, `calculateBrierScore`**
+  (klasifikační metriky: precision/recall/F1/accuracy/FPR/specificity,
+  ROC-AUC, Brier score) -- čisté, synchronní, I/O-free. MIGROVÁNO do
+  `connectors/safeorder/legacy/backtest/metrics.ts` +
+  `domains/safeorder/BacktestRule.ts` (`MetricSetRule`, `RocAucRule`,
+  `BrierScoreRule`), 1:1 delegace, parity testy proti skutečné legacy
+  funkci v `tests/regression/safeorder/backtest-rule-parity.test.ts`.
+
+- **`PointInTimeBacktestEngine.runBacktest`** -- async orchestrace:
+  staví mock in-memory D1 databázi (`PointInTimeD1Database`), instancuje
+  `FiveStagePipeline` (DB-orchestrátor, sám nemigrován -- viz výše),
+  volá `generateBlindToken` (async crypto), iteruje objednávky
+  chronologicky a simuluje "point-in-time" evaluaci s postupnou
+  aktualizací risk-graph uzlů. Je to CELÝ E2E test harness, ne business
+  logika -- konzument Rules (`RiskEngineRule`, `CalibrationRule`,
+  `PolicyRule`, atd.), stejná kategorie jako
+  `LCodePipelineOrchestrator`/`ProcurementWorkflow`/`FiveStagePipeline`.
+  NEMIGROVÁNO.
+
+- **`parseOkfishXml`, `parseGuaranaPlusCsv`** -- čisté parsery, ale
+  vázané na konkrétní KONKURENČNÍ/EXTERNÍ legacy export formáty
+  (OKfish Shoptet XML, GuaranaPlus Shoptet CSV) použité jen pro
+  historický backtest na cizích datových sadách -- NENÍ SafeOrder
+  doménová logika (na rozdíl od Shoptet CSV parseru v Pricing/Omega
+  Fázi, který parsuje VLASTNÍ produkční feed formát). NEMIGROVÁNO --
+  mimo scope SafeOrder Rule contract migrace.
+
+- **`PointInTimeD1Database`** -- mock D1 implementace pro testování,
+  ne produkční kód. NEMIGROVÁNO.
+
 ## Shrnutí
 
-Nic z výše uvedeného nesplňuje "čistá synchronní funkce bez I/O" Rule<>
-kontrakt. Dvě datové konfigurace (`SAAS_PLAN_DEFINITIONS`,
-`PLATFORM_CAPABILITIES`) jsou kandidáti na budoucí přesun do
-`core/tenant/` jako konstanty -- ne teď, mimo scope tohoto kroku.
+Nic z billing/onboarding/capabilities/security/ingestion nesplňuje
+"čistá synchronní funkce bez I/O" Rule<> kontrakt. Dvě datové
+konfigurace (`SAAS_PLAN_DEFINITIONS`, `PLATFORM_CAPABILITIES`) jsou
+kandidáti na budoucí přesun do `core/tenant/` jako konstanty -- ne teď,
+mimo scope tohoto kroku. Z `backtest/point-in-time-backtest.ts` byly
+tři čisté metrikové funkce migrovány (viz sekce výše), zbytek souboru
+(orchestrace, cizí formát parsery, mock DB) zůstává nemigrovaný.
