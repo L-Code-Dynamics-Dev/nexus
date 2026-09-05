@@ -1,11 +1,23 @@
-// core/state-machine framework testy -- ověřují obecný kontrakt proti TŘEM
-// nezávislým referenčním vzorům (žádný z nich není napojen na produkční kód,
-// toto je jen framework-level parity/consistency test):
+// core/state-machine framework testy -- ověřují obecný kontrakt proti DVĚMA
+// nezávislým, PŘÍMO OVĚŘENÝM referenčním vzorům (žádný z nich není napojen
+// na produkční kód, toto je jen framework-level parity/consistency test):
 //
 //   1. Omega SyncJob/JobState -- lineární sekvence s failure branches
 //   2. AIE PurchaseOrder -- MULTI-AXIS (lifecycle/cancellationState/supplierEcho)
-//   3. SafeOrder CalibrationProfileStatus -- lineární s explicitní ALLOWED_TRANSITIONS
-//      mapou (GENERATED->PENDING_REVIEW->VALIDATED->SHADOW->ACTIVE, +REJECTED/SUPERSEDED)
+//
+// POZNÁMKA K OPRAVĚ (2026-09-05): Tento soubor dříve obsahoval třetí vzor,
+// "SafeOrder CalibrationProfileStatus", tvrdící GENERATED->PENDING_REVIEW->
+// VALIDATED->SHADOW->ACTIVE state machine s citací ~/safeorder-3.0/src/core/
+// calibration/calibration-profile.ts:8-14,58-66. Tenhle soubor NEEXISTUJE
+// a skutečný calibration-engine.ts (jediný soubor v tom adresáři) neobsahuje
+// žádný state machine -- je to čistě matematický risk-probability kalibrační
+// model (logistic/piecewise transfer funkce). Vzor byl fabrikován paralelním
+// subagentem (tool_uses: 0 v jeho task-notification, stejný vzorec jako
+// další dva odhalené případy fabrikace ve stejné session) a nesprávně
+// přijat jako ověřený fakt. Odstraněno po přímém ověření skutečného obsahu
+// souboru. core/state-machine/StateMachine.ts framework samotný zůstává
+// beze změny -- je to obecný kontrakt, neobsahuje žádnou SafeOrder-specific
+// logiku, jen testy odkazovaly na neexistující zdroj.
 
 import { describe, it, expect } from 'vitest';
 import { evaluateTransition, evaluateAxisTransition, type StateAxisDefinition } from '../../core/state-machine/StateMachine.js';
@@ -142,53 +154,5 @@ describe('State Machine — Vzor 2: PurchaseOrder (multi-axis, nezávislé osy)'
         const result = evaluateAxisTransition(purchaseOrderDefinitions, state, 'cancellationState', 'CANCELLED');
         expect(result.allowed).toBe(false);
         expect(result.reason).toContain('terminal');
-    });
-});
-
-// --- Vzor 3: SafeOrder CalibrationProfileStatus (lineární, ověřeno v repu) ---
-// ~/safeorder-3.0/src/core/calibration/calibration-profile.ts:8-14,58-66 --
-// ALLOWED_TRANSITIONS mapa (přesně reprodukovaná struktura, ne re-implementace
-// byznys logiky, jen ověření že framework tenhle tvar unese).
-
-type CalibrationProfileStatus = 'GENERATED' | 'PENDING_REVIEW' | 'VALIDATED' | 'SHADOW' | 'ACTIVE' | 'REJECTED' | 'SUPERSEDED';
-
-const calibrationStatusDefinition: StateAxisDefinition<CalibrationProfileStatus> = {
-    axisName: 'calibrationProfileStatus',
-    initialState: 'GENERATED',
-    terminalStates: ['REJECTED', 'SUPERSEDED'],
-    transitions: {
-        GENERATED: ['PENDING_REVIEW', 'REJECTED'],
-        PENDING_REVIEW: ['VALIDATED', 'REJECTED'],
-        VALIDATED: ['SHADOW', 'REJECTED'],
-        SHADOW: ['ACTIVE', 'REJECTED'],
-        ACTIVE: ['SUPERSEDED'],
-        REJECTED: [],
-        SUPERSEDED: [],
-    },
-};
-
-describe('State Machine — Vzor 3: SafeOrder CalibrationProfileStatus', () => {
-    it('allows the canonical calibration promotion path', () => {
-        expect(evaluateTransition(calibrationStatusDefinition, 'GENERATED', 'PENDING_REVIEW').allowed).toBe(true);
-        expect(evaluateTransition(calibrationStatusDefinition, 'VALIDATED', 'SHADOW').allowed).toBe(true);
-        expect(evaluateTransition(calibrationStatusDefinition, 'SHADOW', 'ACTIVE').allowed).toBe(true);
-    });
-
-    it('rejects skipping SHADOW (VALIDATED -> ACTIVE directly)', () => {
-        const result = evaluateTransition(calibrationStatusDefinition, 'VALIDATED', 'ACTIVE');
-        expect(result.allowed).toBe(false);
-    });
-
-    it('rejects promoting an already-superseded profile', () => {
-        const result = evaluateTransition(calibrationStatusDefinition, 'SUPERSEDED', 'ACTIVE');
-        expect(result.allowed).toBe(false);
-        expect(result.reason).toContain('terminal');
-    });
-
-    it('rejection is possible from every non-terminal state', () => {
-        expect(evaluateTransition(calibrationStatusDefinition, 'GENERATED', 'REJECTED').allowed).toBe(true);
-        expect(evaluateTransition(calibrationStatusDefinition, 'PENDING_REVIEW', 'REJECTED').allowed).toBe(true);
-        expect(evaluateTransition(calibrationStatusDefinition, 'VALIDATED', 'REJECTED').allowed).toBe(true);
-        expect(evaluateTransition(calibrationStatusDefinition, 'SHADOW', 'REJECTED').allowed).toBe(true);
     });
 });
