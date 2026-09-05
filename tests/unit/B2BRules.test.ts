@@ -6,6 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { getBusinessProfile, isBusinessCustomer, getB2BPricingContext } from '../../domains/b2b/BusinessProfileAccessor.js';
+import { BusinessProfileValidationRule } from '../../domains/b2b/BusinessProfileValidationRule.js';
 import type { Customer, BusinessProfile } from '../../core/canonical/entities/Customer.js';
 
 const now = '2026-09-05T00:00:00Z';
@@ -85,5 +86,73 @@ describe('Fáze 6.2 invariant — BusinessProfile nesmí obsahovat vlastní pric
         expect('approvalStatus' in businessProfile).toBe(false);
         expect('creditLimit' in businessProfile).toBe(false);
         expect('approvedBy' in businessProfile).toBe(false);
+    });
+});
+
+describe('BusinessProfileValidationRule — Fáze 6.3 bod 6 (minimální strukturální validace)', () => {
+    const rule = new BusinessProfileValidationRule({ tenantId: 'ten_1', ruleId: 'business-profile-validation-v1', ruleVersion: '1' });
+
+    it('validní BusinessProfile (jen povinná pole) projde', () => {
+        const result = rule.evaluate({ company: 'ACME s.r.o.', taxIdentifiers: 'CZ12345678' });
+        expect(result.valid).toBe(true);
+        expect(result.errors).toEqual([]);
+    });
+
+    it('validní BusinessProfile se všemi poli projde', () => {
+        const result = rule.evaluate({
+            company: 'ACME s.r.o.',
+            taxIdentifiers: 'CZ12345678',
+            pricingContext: 'pricelist_b2b_1',
+            paymentTerms: 'net30',
+        });
+        expect(result.valid).toBe(true);
+        expect(result.errors).toEqual([]);
+    });
+
+    it('prázdný company selže', () => {
+        const result = rule.evaluate({ company: '', taxIdentifiers: 'CZ12345678' });
+        expect(result.valid).toBe(false);
+        expect(result.errors).toContain('company nesmí být prázdný/whitespace-only string.');
+    });
+
+    it('whitespace-only company selže', () => {
+        const result = rule.evaluate({ company: '   ', taxIdentifiers: 'CZ12345678' });
+        expect(result.valid).toBe(false);
+        expect(result.errors.some((e) => e.includes('company'))).toBe(true);
+    });
+
+    it('prázdný taxIdentifiers selže', () => {
+        const result = rule.evaluate({ company: 'ACME s.r.o.', taxIdentifiers: '' });
+        expect(result.valid).toBe(false);
+        expect(result.errors).toContain('taxIdentifiers nesmí být prázdný/whitespace-only string.');
+    });
+
+    it('oba povinné prázdné vrací OBĚ chyby najednou (ne jen první)', () => {
+        const result = rule.evaluate({ company: '', taxIdentifiers: '' });
+        expect(result.valid).toBe(false);
+        expect(result.errors.length).toBe(2);
+    });
+
+    it('chybějící volitelná pole (pricingContext/paymentTerms) NEJSOU chyba', () => {
+        const result = rule.evaluate({ company: 'ACME s.r.o.', taxIdentifiers: 'CZ12345678' });
+        expect(result.valid).toBe(true);
+    });
+
+    it('přítomný, ale prázdný pricingContext selže', () => {
+        const result = rule.evaluate({ company: 'ACME s.r.o.', taxIdentifiers: 'CZ12345678', pricingContext: '' });
+        expect(result.valid).toBe(false);
+        expect(result.errors.some((e) => e.includes('pricingContext'))).toBe(true);
+    });
+
+    it('přítomný, ale prázdný paymentTerms selže', () => {
+        const result = rule.evaluate({ company: 'ACME s.r.o.', taxIdentifiers: 'CZ12345678', paymentTerms: '   ' });
+        expect(result.valid).toBe(false);
+        expect(result.errors.some((e) => e.includes('paymentTerms'))).toBe(true);
+    });
+
+    it('NEVALIDUJE formát taxIdentifiers (žádný regex, business-specific validace je mimo scope)', () => {
+        // "not-a-valid-ico" by formátem selhalo, ale Rule kontroluje jen neprázdnost
+        const result = rule.evaluate({ company: 'ACME s.r.o.', taxIdentifiers: 'not-a-valid-ico' });
+        expect(result.valid).toBe(true);
     });
 });

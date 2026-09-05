@@ -4,7 +4,7 @@
 // rozhodování, publikace jen validního Creative, terminalita ARCHIVED.
 
 import { describe, it, expect } from 'vitest';
-import { CampaignLifecycleRule } from '../../domains/campaign/CampaignLifecycleRule.js';
+import { CampaignLifecycleRule, shouldEvaluateCampaign } from '../../domains/campaign/CampaignLifecycleRule.js';
 import {
     PromoGroupPriorityValidationRule,
     resolveConflict,
@@ -88,6 +88,18 @@ describe('CampaignLifecycleRule', () => {
     });
 });
 
+describe('shouldEvaluateCampaign -- ROZHODNUTO (Jose Fáze 6.3): ACTIVE se vyhodnocuje, ostatní ne', () => {
+    it('vrací true jen pro ACTIVE', () => {
+        expect(shouldEvaluateCampaign('ACTIVE')).toBe(true);
+    });
+
+    it('vrací false pro DRAFT/PAUSED/ENDED', () => {
+        expect(shouldEvaluateCampaign('DRAFT')).toBe(false);
+        expect(shouldEvaluateCampaign('PAUSED')).toBe(false);
+        expect(shouldEvaluateCampaign('ENDED')).toBe(false);
+    });
+});
+
 describe('PromoGroupPriorityValidationRule', () => {
     const rule = new PromoGroupPriorityValidationRule(ctx);
 
@@ -109,8 +121,8 @@ describe('PromoGroupPriorityValidationRule', () => {
 });
 
 describe('resolveConflict — PromoGroup priority', () => {
-    function group(id: string, productIds: string[], priority: number): PromoGroup {
-        return { id, tenantId: 'ten_1', createdAt: now, updatedAt: now, name: id, productIds, priority };
+    function group(id: string, productIds: string[], priority: number, createdAt: string = now): PromoGroup {
+        return { id, tenantId: 'ten_1', createdAt, updatedAt: now, name: id, productIds, priority };
     }
 
     it('vybere PromoGroup s nejvyšší priority pro daný produkt', () => {
@@ -118,6 +130,7 @@ describe('resolveConflict — PromoGroup priority', () => {
         const result = resolveConflict(groups, 'prod_1');
         expect(result.resolved).toBe(true);
         expect(result.winner?.id).toBe('high');
+        expect(result.tieBreakApplied).toBe(false);
     });
 
     it('ignoruje PromoGroup, které daný produkt vůbec neobsahují', () => {
@@ -133,12 +146,28 @@ describe('resolveConflict — PromoGroup priority', () => {
         expect(result.resolved).toBe(false);
     });
 
-    it('UNRESOLVED: vrací resolved:false při remíze na nejvyšší priority, nevybírá libovolně', () => {
-        const groups = [group('tie_a', ['prod_1'], 10), group('tie_b', ['prod_1'], 10)];
+    it('ROZHODNUTO (Jose Fáze 6.3): remíza na priority se řeší tie-breakem podle nejstaršího createdAt', () => {
+        const groups = [
+            group('tie_newer', ['prod_1'], 10, '2026-09-05T12:00:00Z'),
+            group('tie_older', ['prod_1'], 10, '2026-09-01T00:00:00Z'),
+        ];
         const result = resolveConflict(groups, 'prod_1');
-        expect(result.resolved).toBe(false);
-        expect(result.winner).toBeUndefined();
-        expect(result.reason).toMatch(/remíza/);
+        expect(result.resolved).toBe(true);
+        expect(result.winner?.id).toBe('tie_older');
+        expect(result.tieBreakApplied).toBe(true);
+        expect(result.reason).toMatch(/createdAt/);
+    });
+
+    it('ROZHODNUTO (Jose Fáze 6.3): remíza na priority I createdAt se řeší tie-breakem podle nejmenšího id', () => {
+        const groups = [
+            group('z_group', ['prod_1'], 10, now),
+            group('a_group', ['prod_1'], 10, now),
+        ];
+        const result = resolveConflict(groups, 'prod_1');
+        expect(result.resolved).toBe(true);
+        expect(result.winner?.id).toBe('a_group');
+        expect(result.tieBreakApplied).toBe(true);
+        expect(result.reason).toMatch(/id/);
     });
 
     it('produkt může patřit do více PromoGroup zároveň (M:N) beze změny výsledku', () => {

@@ -15,23 +15,13 @@
 //   - Nevytváří ani neupravuje vazbu na Supplier -- Supplier zůstává
 //     oddělený koncept, tato Rule o něm vůbec neví.
 //
-// UNRESOLVED (nelze jednoznačně odvodit ze zadání, NEIMPLEMENTOVÁNO):
-//   - Co přesně se má stát, když StockPosition.warehouseId je undefined
-//     (StockPosition bez warehouse vazby vůbec, viz Stock.ts Non-
-//     Interference komentář -- existující záznamy bez warehouseId zůstávají
-//     validní). Zadání mluví o tom, ŽE aktivní vazba vyžaduje ACTIVE
-//     Warehouse, ale neříká, jestli chybějící vazba je "neplatná" nebo
-//     "mimo scope tohoto pravidla" (prostě žádná vazba k ověření). Tato
-//     Rule vrací `isValidActiveLink: false` s explicitním reason pro tento
-//     případ, ale NEPOVAŽUJE to jednoznačně za "chybu" v业務 smyslu --
-//     jen za "toto konkrétní pravidlo se neuplatňuje / nelze potvrdit".
-//     Volající, který potřebuje jiné chování pro "žádná vazba" vs.
-//     "vazba na neaktivní sklad", potřebuje další explicitní zadání.
-//   - Co se stane, když warehouseId odkazuje na Warehouse.id, který
-//     neodpovídá předanému Warehouse objektu vůbec (typo/jiný sklad) --
-//     Rule to řeší jako "vazba neplatná" (id se neshoduje), ale žádné
-//     zadání neřeší chybové hlášení pro tento konkrétní scénář odděleně
-//     od "sklad není aktivní".
+// ROZHODNUTO (Jose 2026-09-05, Fáze 6.3): "warehouseId === undefined
+// znamená globální / dosud neurčený sklad, NE automaticky 'hlavní sklad'."
+// `linkStatus` diskriminant níže explicitně odlišuje tenhle legitimní stav
+// ("UNSCOPED" -- sklad zatím nebyl určen, není to porušení pravidla) od
+// skutečných chyb (nesprávná/neaktivní vazba). ŽÁDNÝ fallback na
+// konkrétní "hlavní sklad" zde není a nebude -- to by bylo přesně to
+// domýšlení, které Jose zakázal.
 
 import type { Rule, RuleContext } from '../../core/canonical/rules/Rule.js';
 import type { Warehouse } from '../../core/canonical/entities/Warehouse.js';
@@ -42,8 +32,22 @@ export interface WarehouseStockLinkRuleInput {
     readonly stockPosition: StockPosition;
 }
 
+/**
+ * ROZHODNUTO (Jose, Fáze 6.3) -- diskriminant vazby:
+ *   'ACTIVE_LINK'        -- StockPosition patří danému Warehouse a ten je ACTIVE.
+ *   'UNSCOPED'           -- StockPosition.warehouseId je undefined; sklad je
+ *                           globální/dosud neurčený, NENÍ to chyba ani
+ *                           implicitní "hlavní sklad" -- žádný fallback.
+ *   'MISMATCHED_WAREHOUSE' -- StockPosition.warehouseId odkazuje na JINÝ
+ *                           sklad, než byl předaný.
+ *   'INACTIVE_WAREHOUSE' -- vazba na SPRÁVNÝ Warehouse, ale ten není ACTIVE.
+ */
+export type WarehouseStockLinkStatus = 'ACTIVE_LINK' | 'UNSCOPED' | 'MISMATCHED_WAREHOUSE' | 'INACTIVE_WAREHOUSE';
+
 export interface WarehouseStockLinkRuleResult {
+    /** `true` POUZE pro 'ACTIVE_LINK' -- žádná jiná hodnota linkStatus nikdy nevrací true. */
     readonly isValidActiveLink: boolean;
+    readonly linkStatus: WarehouseStockLinkStatus;
     readonly reason?: string;
 }
 
@@ -56,13 +60,15 @@ export class WarehouseStockLinkRule implements Rule<WarehouseStockLinkRuleInput,
         if (stockPosition.warehouseId === undefined) {
             return {
                 isValidActiveLink: false,
-                reason: 'StockPosition nemá warehouseId -- žádná skladová vazba k ověření.',
+                linkStatus: 'UNSCOPED',
+                reason: 'StockPosition nemá warehouseId -- sklad je globální/dosud neurčený. Toto NENÍ chyba a NENÍ to automaticky "hlavní sklad".',
             };
         }
 
         if (stockPosition.warehouseId !== warehouse.id) {
             return {
                 isValidActiveLink: false,
+                linkStatus: 'MISMATCHED_WAREHOUSE',
                 reason: `StockPosition.warehouseId ("${stockPosition.warehouseId}") neodpovídá předanému Warehouse.id ("${warehouse.id}").`,
             };
         }
@@ -70,10 +76,11 @@ export class WarehouseStockLinkRule implements Rule<WarehouseStockLinkRuleInput,
         if (warehouse.status !== 'ACTIVE') {
             return {
                 isValidActiveLink: false,
+                linkStatus: 'INACTIVE_WAREHOUSE',
                 reason: `Warehouse "${warehouse.id}" není aktivní (status "${warehouse.status}") -- pouze aktivní Warehouse může být použit jako aktivní skladová vazba.`,
             };
         }
 
-        return { isValidActiveLink: true };
+        return { isValidActiveLink: true, linkStatus: 'ACTIVE_LINK' };
     }
 }

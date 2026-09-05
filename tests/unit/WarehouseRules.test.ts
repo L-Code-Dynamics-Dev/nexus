@@ -1,5 +1,6 @@
-// WarehouseStockLinkRule -- Fáze 6.2 business rules testy. Pokrývá aktivní/
-// neaktivní sklad, chybějící vazbu, a nesouhlasící warehouseId.
+// WarehouseStockLinkRule -- Fáze 6.2 business rules testy + Fáze 6.3
+// rozhodnutí (warehouseId undefined = UNSCOPED, ne "hlavní sklad").
+// Pokrývá aktivní/neaktivní sklad, chybějící vazbu, a nesouhlasící warehouseId.
 
 import { describe, it, expect } from 'vitest';
 import { WarehouseStockLinkRule } from '../../domains/warehouse/WarehouseStockLinkRule.js';
@@ -41,37 +42,53 @@ function makeStockPosition(overrides: Partial<StockPosition> = {}): StockPositio
 describe('WarehouseStockLinkRule', () => {
     const rule = new WarehouseStockLinkRule({ tenantId: 'ten_1', ruleId: 'warehouse-stock-link-v1', ruleVersion: '1' });
 
-    it('potvrdí platnou vazbu na ACTIVE Warehouse', () => {
+    it('potvrdí platnou vazbu na ACTIVE Warehouse -- linkStatus ACTIVE_LINK', () => {
         const result = rule.evaluate({ warehouse: makeWarehouse(), stockPosition: makeStockPosition() });
         expect(result.isValidActiveLink).toBe(true);
+        expect(result.linkStatus).toBe('ACTIVE_LINK');
         expect(result.reason).toBeUndefined();
     });
 
-    it('zamítne vazbu na INACTIVE Warehouse', () => {
+    it('zamítne vazbu na INACTIVE Warehouse -- linkStatus INACTIVE_WAREHOUSE', () => {
         const result = rule.evaluate({
             warehouse: makeWarehouse({ status: 'INACTIVE' }),
             stockPosition: makeStockPosition(),
         });
         expect(result.isValidActiveLink).toBe(false);
+        expect(result.linkStatus).toBe('INACTIVE_WAREHOUSE');
         expect(result.reason).toMatch(/není aktivní/i);
     });
 
-    it('zamítne, když StockPosition.warehouseId chybí (undefined)', () => {
+    it('ROZHODNUTO (Fáze 6.3): warehouseId undefined -- linkStatus UNSCOPED, NENÍ chyba, NENÍ automaticky "hlavní sklad"', () => {
         const result = rule.evaluate({
             warehouse: makeWarehouse(),
             stockPosition: makeStockPosition({ warehouseId: undefined }),
         });
         expect(result.isValidActiveLink).toBe(false);
-        expect(result.reason).toMatch(/nemá warehouseId/i);
+        expect(result.linkStatus).toBe('UNSCOPED');
+        expect(result.reason).toMatch(/globální|dosud neurčený/i);
+        // Rule nikdy nevrací žádný konkrétní Warehouse.id jako fallback --
+        // isValidActiveLink zůstává false, žádné "vybráno automaticky".
+        expect(result.isValidActiveLink).toBe(false);
     });
 
-    it('zamítne, když StockPosition.warehouseId neodpovídá předanému Warehouse.id', () => {
+    it('zamítne, když StockPosition.warehouseId neodpovídá předanému Warehouse.id -- linkStatus MISMATCHED_WAREHOUSE', () => {
         const result = rule.evaluate({
             warehouse: makeWarehouse({ id: 'wh_1' }),
             stockPosition: makeStockPosition({ warehouseId: 'wh_2' }),
         });
         expect(result.isValidActiveLink).toBe(false);
+        expect(result.linkStatus).toBe('MISMATCHED_WAREHOUSE');
         expect(result.reason).toMatch(/neodpovídá/i);
+    });
+
+    it('linkStatus UNSCOPED je odlišný od MISMATCHED_WAREHOUSE a INACTIVE_WAREHOUSE (tři různé diskriminanty)', () => {
+        const unscoped = rule.evaluate({ warehouse: makeWarehouse(), stockPosition: makeStockPosition({ warehouseId: undefined }) });
+        const mismatched = rule.evaluate({ warehouse: makeWarehouse(), stockPosition: makeStockPosition({ warehouseId: 'wh_other' }) });
+        const inactive = rule.evaluate({ warehouse: makeWarehouse({ status: 'INACTIVE' }), stockPosition: makeStockPosition() });
+
+        const statuses = new Set([unscoped.linkStatus, mismatched.linkStatus, inactive.linkStatus]);
+        expect(statuses.size).toBe(3);
     });
 
     it('nepřidává žádnou vazbu na Supplier -- vstupní ani výstupní shape ho neobsahuje', () => {

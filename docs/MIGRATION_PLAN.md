@@ -83,15 +83,24 @@ Marketing (`domains/marketing/`) a samostatná B2B doména (`domains/b2b/` jako 
 - Testy: `tests/unit/{CampaignRules,InvoiceRules,WarehouseRules,BillingRules,B2BRules}.test.ts` — 61 nových testů (22+11+6+13+9).
 - `npm run build` čistý, `npm test` 527/527 (466 před Fází 6.2 + 61 nových; `omega-executor-sanity.test.ts` ověřen izolovaně s vyšším timeoutem kvůli systémové zátěži stroje, nesouvisí se změnou).
 
-**UNRESOLVED — explicitně neimplementováno, protože nejde jednoznačně odvodit ze zadání** (v komentářích u příslušných souborů):
-1. Campaign: konkrétní odlišné chování ACTIVE vs. PAUSED nad rámec lifecycle přechodů a PromoGroup invariantu — zadání neuvádí konkrétní pravidlo.
-2. PromoGroup: tie-break při shodné nejvyšší `priority` dvou+ skupin pro stejný produkt — `resolveConflict()` vrací `resolved: false`, nevybírá nic naslepo.
-3. Invoice: zda ISSUED vyžaduje i vyplněný `omegaDocumentId` (ne jen `orderId`) — zadání zmiňuje jen `orderId` jako blokující podmínku.
-4. Warehouse: přesná sémantika `StockPosition.warehouseId === undefined` (no-link vs. invalid-link) — zadání neřeší explicitně tenhle případ.
-5. Billing: vztah `Subscription.status` ↔ `TenantPlan.status` (nezávislé osy, nebo odvozené?) — zadání říká jen "respektuj existující model", ne konkrétní synchronizační pravidlo.
-6. B2B: validace obsahu `BusinessProfile` polí (formát company/taxIdentifiers/paymentTerms) — zadání nespecifikuje žádné konkrétní pravidlo, accessor jen čte.
+**Rozhodnutí (Fáze 6.3) — HOTOVO** (2026-09-05, Josovo zadání "rozhodnutí těchto šesti bodů", implementováno 3 paralelními forky na nezávislé domény):
+1. **Campaign ACTIVE vs PAUSED**: `shouldEvaluateCampaign(status)` v `CampaignLifecycleRule.ts` — `true` jen pro ACTIVE, žádná další odlišnost.
+2. **PromoGroup tie-break**: `resolveConflict()` už NEVRACÍ `resolved: false` na remízu — deterministický tie-break: nejstarší `createdAt`, při shodě nejmenší `id`. Nové pole `tieBreakApplied` signalizuje, že rozhodlo víc než čistá priority.
+3. **Invoice ISSUED + Omega**: `InvoiceLifecycleRule.ts` — PENDING→ISSUED teď vyžaduje i neprázdný `omegaDocumentId` (dřív jen `orderId`). `omegaDocumentId` STÁLE nikdy negenerována, jen vyžadována jako podmínka.
+4. **Warehouse warehouseId undefined**: `WarehouseStockLinkRule.ts` — nový diskriminant `linkStatus: 'ACTIVE_LINK' | 'UNSCOPED' | 'MISMATCHED_WAREHOUSE' | 'INACTIVE_WAREHOUSE'`. `undefined` → `UNSCOPED` (globální/neurčený sklad), explicitně odlišené od chyby, žádný fallback na "hlavní sklad".
+5. **Subscription ↔ TenantPlan**: `isConsistentWithTenantPlan()` v `SubscriptionLifecycleRule.ts` — čistá konzistenční kontrola (ne sync/přepis). Jisté shody: ACTIVE↔ACTIVE, CANCELLED↔CANCELED. Nejlepší odvození: PAST_DUE↔GRACE_PERIOD. Fail-safe `false`: TRIAL (nemá přímý ekvivalent), SUSPENDED proti čemukoliv.
+6. **BusinessProfile validace**: nový `domains/b2b/BusinessProfileValidationRule.ts` — jen strukturální (neprázdné `company`/`taxIdentifiers`, optional pole neprázdná pokud přítomná). ŽÁDNÁ validace formátu (IČO/DIČ regex, délka) — to zůstává na budoucí konkrétní kontrakt.
 
-**Explicitně MIMO SCOPE** (Jose: "Neimplementovat zatím") — konkrétní promo výpočty/ceny, marketingové distribuční kanály, skladové přesuny/rezervace/alokace, automatická fakturace, payment gateway, usage billing, B2B approval workflow, B2B credit limity, retargeting/email/affiliate.
+Testy: 88 nových/upravených (Campaign 22→25, Invoice 11→14, Warehouse 6→7, Billing 13→20, B2B 9→19).
+`npm run build` čistý, `npm test` 551/551 (542 hlavní běh + 9 omega-executor izolovaně s vyšším timeoutem kvůli systémové zátěži stroje).
+
+**Stále UNRESOLVED po Fázi 6.3** (Jose fail-safe explicitně žádal nedomýšlet i tady):
+- Subscription 'TRIAL' ↔ TenantPlan mapping — žádný přímý ekvivalent v TenantPlan enum, `isConsistentWithTenantPlan` vrací `false` (nekonzistentní/neověřitelné), ne tichou shodu.
+- Subscription 'PAST_DUE' ↔ TenantPlan 'GRACE_PERIOD' — nejlepší dostupné odvození ze jmen, ne jistota (GRACE_PERIOD nebyl nikde jinde v repu blíž specifikován).
+
+**Explicitně MIMO SCOPE** (Jose: "Neimplementovat zatím", nezměněno Fází 6.3) — konkrétní promo výpočty/ceny, marketingové distribuční kanály, skladové přesuny/rezervace/alokace, automatická fakturace, payment gateway, usage billing, B2B approval workflow, B2B credit limity, retargeting/email/affiliate, validace formátu BusinessProfile polí.
+
+Další krok (Jose): **Fáze 6.4 — konkrétní business scénáře nad těmito rozhodnutími.** Žádné nové domény ani abstrakce.
 
 ## Co explicitně NEPŘENÁŠET
 

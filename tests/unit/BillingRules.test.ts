@@ -5,7 +5,7 @@
 // Invoice z objednávky je od Billingu vždy oddělená."
 
 import { describe, it, expect } from 'vitest';
-import { SubscriptionLifecycleRule } from '../../domains/billing/SubscriptionLifecycleRule.js';
+import { SubscriptionLifecycleRule, isConsistentWithTenantPlan } from '../../domains/billing/SubscriptionLifecycleRule.js';
 import type { Subscription } from '../../core/canonical/entities/Billing.js';
 
 describe('SubscriptionLifecycleRule — lifecycle přechody', () => {
@@ -83,5 +83,45 @@ describe('Fáze 6.2 invariant — Subscription je striktně oddělená od Invoic
         expect('invoiceId' in subscription).toBe(false);
         expect('orderId' in subscription).toBe(false);
         expect('omegaDocumentId' in subscription).toBe(false);
+    });
+});
+
+describe('isConsistentWithTenantPlan — Fáze 6.3 bod 5 (Subscription <-> TenantPlan konzistence)', () => {
+    it('ACTIVE <-> ACTIVE je konzistentní (jistá shoda)', () => {
+        expect(isConsistentWithTenantPlan('ACTIVE', 'ACTIVE')).toBe(true);
+    });
+
+    it('CANCELLED <-> CANCELED je konzistentní (pozor na pravopis, jistá shoda)', () => {
+        expect(isConsistentWithTenantPlan('CANCELLED', 'CANCELED')).toBe(true);
+    });
+
+    it('PAST_DUE <-> GRACE_PERIOD je konzistentní (nejlepší dostupné odvození)', () => {
+        expect(isConsistentWithTenantPlan('PAST_DUE', 'GRACE_PERIOD')).toBe(true);
+    });
+
+    it('TRIAL nikdy nevrací true (UNRESOLVED mapping, fail-safe)', () => {
+        expect(isConsistentWithTenantPlan('TRIAL', 'ACTIVE')).toBe(false);
+        expect(isConsistentWithTenantPlan('TRIAL', 'GRACE_PERIOD')).toBe(false);
+        expect(isConsistentWithTenantPlan('TRIAL', 'SUSPENDED')).toBe(false);
+        expect(isConsistentWithTenantPlan('TRIAL', 'CANCELED')).toBe(false);
+    });
+
+    it('SUSPENDED (TenantPlan) není konzistentní s žádným Subscription stavem', () => {
+        expect(isConsistentWithTenantPlan('ACTIVE', 'SUSPENDED')).toBe(false);
+        expect(isConsistentWithTenantPlan('PAST_DUE', 'SUSPENDED')).toBe(false);
+        expect(isConsistentWithTenantPlan('CANCELLED', 'SUSPENDED')).toBe(false);
+    });
+
+    it('nesprávné kombinace (ACTIVE proti GRACE_PERIOD/CANCELED) nejsou konzistentní', () => {
+        expect(isConsistentWithTenantPlan('ACTIVE', 'GRACE_PERIOD')).toBe(false);
+        expect(isConsistentWithTenantPlan('ACTIVE', 'CANCELED')).toBe(false);
+        expect(isConsistentWithTenantPlan('CANCELLED', 'ACTIVE')).toBe(false);
+        expect(isConsistentWithTenantPlan('CANCELLED', 'GRACE_PERIOD')).toBe(false);
+        expect(isConsistentWithTenantPlan('PAST_DUE', 'ACTIVE')).toBe(false);
+        expect(isConsistentWithTenantPlan('PAST_DUE', 'CANCELED')).toBe(false);
+    });
+
+    it('je čistá funkce — stejný vstup vždy vrací stejný výsledek', () => {
+        expect(isConsistentWithTenantPlan('PAST_DUE', 'GRACE_PERIOD')).toBe(isConsistentWithTenantPlan('PAST_DUE', 'GRACE_PERIOD'));
     });
 });

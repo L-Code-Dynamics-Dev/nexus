@@ -90,8 +90,11 @@ export interface BillingEvent extends CanonicalEntity {
  * Billing striktně odděleno od Invoice/Order. Zbývající OPEN QUESTIONS
  * (business rule detail, EXPLICITNĚ MIMO SCOPE Fáze 6.1):
  *
- * 1. Vztah Subscription.status <-> TenantPlan.status (core/tenant/types.ts)
- *    -- jsou to nezávislé osy, nebo je jedno odvozené z druhého? Nerozhodnuto.
+ * 1. ROZHODNUTO (Fáze 6.3, bod 5): Vztah Subscription.status <->
+ *    TenantPlan.status -- konzistenční kontrola (ne sync/přepis), viz
+ *    `isConsistentWithTenantPlan()` v domains/billing/SubscriptionLifecycleRule.ts.
+ *    Zbytkový UNRESOLVED: TRIAL a PAST_DUE<->GRACE_PERIOD mapování jsou
+ *    nejlepší dostupné odvození ze jmen, ne jistota -- viz komentář tam.
  * 2. Kdo Subscription/BillingEvent vytváří (platební brána webhook? manuální
  *    zápis?) -- EXPLICITNĚ MIMO SCOPE (Jose: "žádné vlastní účetnictví",
  *    "žádný payment gateway", "žádné usage billing").

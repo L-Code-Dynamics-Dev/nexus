@@ -1,6 +1,6 @@
 // InvoiceLifecycleRule -- Fáze 6.2 business rule nad Invoice lifecycle
-// kostrou (core/canonical/entities/Invoice.ts). Validuje POUZE explicitně
-// zadaná pravidla z Josova zadání, žádná domněnka navíc.
+// kostrou (core/canonical/entities/Invoice.ts), rozhodnutí Fáze 6.3
+// doplněno. Validuje POUZE explicitně zadaná pravidla, žádná domněnka navíc.
 //
 // Pravidla implementovaná zde:
 //   1. Lifecycle přechod (PENDING -> ISSUED | CANCELLED) musí být povolený
@@ -9,26 +9,24 @@
 //      neprázdný string. `Invoice.orderId` je už typově povinné pole, ale
 //      runtime kontrola zůstává smysluplná jako defenzivní invariant
 //      (prázdný string by typově prošel, sémanticky ne).
+//   3. ROZHODNUTO (Jose 2026-09-05, Fáze 6.3): "ISSUED vyžaduje
+//      omegaDocumentId. Bez účetního dokladu není faktura vystavená."
+//      Přechod do ISSUED nyní selže i tehdy, když `omegaDocumentId`
+//      chybí nebo je prázdný string -- stejná úroveň kontroly jako u
+//      `orderId`. DŮLEŽITÉ: tohle NENÍ generování -- Rule stále nikdy
+//      nevytváří `omegaDocumentId` sama, jen teď navíc VYŽADUJE jeho
+//      přítomnost jako podmínku přechodu (účetní doklad musí už
+//      existovat na Omega straně, než Nexus označí Invoice za ISSUED).
 //
 // Co tato Rule ZÁMĚRNĚ NEDĚLÁ (Jose: "žádná automatická fakturace"):
 //   - Negeneruje ani nevytváří `omegaDocumentId` -- to je vždy reference
 //     na účetní systém (Omega), NIKDY vlastní účetní dokument NEXUSu.
-//     Rule ho jen čte/předává dál, pokud je na vstupu přítomný.
+//     Rule ho jen čte/vyžaduje přítomnost, nikdy nezapisuje.
 //   - Nespouští žádný trigger/workflow -- evaluate() je čistá validace na
 //     explicitní vyžádání volajícího, žádné side effects, žádné I/O.
 //   - Nerozhoduje, KDY se má Invoice vystavit -- to je odpovědnost
-//     volajícího kódu (mimo scope Fáze 6.2), Rule jen řekne, jestli
+//     volajícího kódu (mimo scope Fáze 6.2/6.3), Rule jen řekne, jestli
 //     POŽADOVANÝ přechod je s daným stavem/daty dovolený.
-//
-// UNRESOLVED (nelze jednoznačně odvodit ze zadání, NEIMPLEMENTOVÁNO):
-//   - Zda ISSUED vyžaduje i vyplněný `omegaDocumentId` (ne jen `orderId`).
-//     Josovo zadání říká jen "ISSUED nesmí být vytvořena bez vazby na
-//     Order" -- o omegaDocumentId mluví jako o referenci, ne jako o
-//     podmínce přechodu. Entity komentář (Invoice.ts řádek 27-28) sám
-//     říká "omegaDocumentId by MĚL být vyplněný -- Rule na vynucení
-//     tohoto invariantu je mimo scope kostry", ale to je z Fáze 6.1, ne
-//     explicitní potvrzení pro 6.2. Vynucovat by znamenalo domýšlet
-//     pravidlo, které Jose v tomto zadání nezopakoval explicitně.
 
 import type { Rule, RuleContext } from '../../core/canonical/rules/Rule.js';
 import type { InvoiceLifecycleState } from '../../core/canonical/entities/Invoice.js';
@@ -81,6 +79,17 @@ export class InvoiceLifecycleRule implements Rule<InvoiceLifecycleRuleInput, Inv
             return {
                 allowed: false,
                 reason: 'ISSUED nesmí být vytvořena bez vazby na Order -- orderId je prázdný.',
+            };
+        }
+
+        // ROZHODNUTO (Jose 2026-09-05, Fáze 6.3): "Bez účetního dokladu
+        // není faktura vystavená." -- omegaDocumentId musí být neprázdný
+        // string, jinak přechod do ISSUED selže. Rule ho stále NEGENERUJE,
+        // jen vyžaduje, že už existuje (musel vzniknout na Omega straně dřív).
+        if (input.targetStatus === 'ISSUED' && (input.omegaDocumentId === undefined || input.omegaDocumentId.trim().length === 0)) {
+            return {
+                allowed: false,
+                reason: 'ISSUED nesmí být vytvořena bez omegaDocumentId -- bez účetního dokladu není faktura vystavená.',
             };
         }
 

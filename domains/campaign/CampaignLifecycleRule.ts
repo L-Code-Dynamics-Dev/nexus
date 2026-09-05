@@ -8,13 +8,12 @@
 // který lze doslovně odvodit ze zadání: DRAFT -> ACTIVE vyžaduje alespoň
 // jednu PromoGroup (kampaň bez PromoGroup nemá co propagovat).
 //
-// UNRESOLVED (Jose: "pokud nejde jednoznačně odvodit, neimplementuj a
-// označ UNRESOLVED"): "explicitní pravidla pro aktivní/pozastavenou/
-// ukončenou kampaň" -- zadání neuvádí KONKRÉTNÍ chování (např. co přesně
-// PAUSED dělá jinak než ACTIVE, jaké invarianty ENDED vynucuje navíc mimo
-// terminalitu, kterou už řeší evaluateTransition()). Bez konkrétní
-// specifikace by cokoliv navíc byla domněnka -- neimplementováno, čeká na
-// upřesnění.
+// ROZHODNUTO (Jose 2026-09-05, Fáze 6.3): "ACTIVE = pravidla se
+// vyhodnocují, PAUSED = kampaň se nevyhodnocuje." Jediná konkrétní věc,
+// kterou lze z téhle věty odvodit, je funkce shouldEvaluateCampaign() níže
+// -- vrací true jen pro ACTIVE. Žádné další "co dělá PAUSED jinak" (žádné
+// zamrazení dat, žádné zachování stavu navíc) nebylo zadáno -- typ sám
+// nic nemaže při PAUSED, takže nic dalšího není potřeba domýšlet.
 
 import type { Rule, RuleContext } from '../../core/canonical/rules/Rule.js';
 import type { CampaignLifecycleState } from '../../core/canonical/entities/Campaign.js';
@@ -61,4 +60,13 @@ export class CampaignLifecycleRule implements Rule<CampaignLifecycleRuleInput, C
 
         return { allowed: true };
     }
+}
+
+/**
+ * ROZHODNUTO (Jose 2026-09-05, Fáze 6.3): "ACTIVE = pravidla se
+ * vyhodnocují, PAUSED = kampaň se nevyhodnocuje." Čistá funkce, žádný I/O
+ * -- true jen pro ACTIVE, false pro DRAFT/PAUSED/ENDED.
+ */
+export function shouldEvaluateCampaign(status: CampaignLifecycleState): boolean {
+    return status === 'ACTIVE';
 }
