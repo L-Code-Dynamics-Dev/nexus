@@ -61,18 +61,18 @@ Vybráno jako první proto, že má nejvyšší produkční zralost (1361 commit
 ### Fáze 6+ — Billing, Marketing, B2B, Campaign, Creative
 **Čistě NEW BUILD.** Žádný zdrojový systém neobsahuje kód k migraci. Postavit až po Fázi 0-5, na hotovém Canonical Model + Connector Layer — jinak vzniknou stejné hardcoded/single-tenant chyby, co řešíme u Pricing Engine dnes.
 
-**Doménová kostra — HOTOVO** (2026-09-05, Josovo zadání "Další kroky Fáze 6"):
-- `core/canonical/entities/Campaign.ts` — `PromoGroup -> Product` (FK `productIds`), `Campaign -> PromoGroup`, `Campaign -> Creative` (existující `campaignId`).
-- `core/canonical/entities/Invoice.ts` — `Invoice -> Order` 1:1 (`orderId`, NE souhrnná N:1 faktura).
-- `core/canonical/entities/Warehouse.ts` + `Stock.ts` — `Warehouse -> StockPosition` přes volitelné `warehouseId` (Non-Interference: existující záznamy beze změny).
-- `core/canonical/entities/Billing.ts` (nový soubor) — `Subscription`/`BillingEvent`, váže se na `Tenant`/`TenantPlan` (core/tenant/types.ts) přes `tenantId`. Explicitně ODDĚLENO od `Invoice.ts`.
-- `core/canonical/entities/Customer.ts` — B2B jako rozšíření (`isBusinessCustomer`/`companyIdentifier`), NENÍ nová doména ani druhý pricing engine.
-- `tests/unit/Phase6DomainSkeleton.test.ts` — 13 testů, ověřují jen strukturu/vztahy (žádné business scénáře).
-- `npm run build` čistý, `npm test` 444/444 (mimo `omega-executor-sanity.test.ts`, flaky pod extrémní systémovou zátěží tohoto stroje v době běhu, nesouvisí se Fází 6 změnou).
+**Doménová kostra + lifecycle (Fáze 6.1) — HOTOVO** (2026-09-05, Josovo zadání "Další kroky Fáze 6" + "Fáze 6.1 = lifecycle + základní invariants"):
+- `core/canonical/entities/Campaign.ts` — `PromoGroup -> Product` (FK `productIds`, povinná `priority` pro řešení konfliktů více skupin), `Campaign -> PromoGroup` (1:N, `promoGroupIds`), `Campaign -> Creative`. Campaign lifecycle DRAFT→ACTIVE→PAUSED→ENDED (ENDED terminální, historie se nemaže). Creative vlastní lifecycle DRAFT→PUBLISHED→ARCHIVED. CampaignPlacement zůstává rozšiřitelný string (ne fixní enum).
+- `core/canonical/entities/Invoice.ts` — `Invoice -> Order` striktně 1:1 (`orderId`). Lifecycle PENDING→ISSUED/CANCELLED (oba terminální). `omegaDocumentId` jako REFERENCE na Omega CanonicalAccountingDocument (ne kopie dat) — Omega zůstává účetním zdrojem pravdy, `omegaDocumentId` je optional (PENDING invoice může existovat před vznikem Omega dokladu).
+- `core/canonical/entities/Warehouse.ts` + `Stock.ts` — `Warehouse -> StockPosition` 1:N přes volitelné `warehouseId` (Non-Interference: existující záznamy beze změny). Warehouse lifecycle ACTIVE↔INACTIVE, BEZ terminálního stavu (dočasné vypnutí, ne trvalé zrušení). Supplier zůstává úplně oddělený, žádná vazba.
+- `core/canonical/entities/Billing.ts` — model Tenant→Subscription→Billing→Plan. Subscription lifecycle TRIAL→ACTIVE→PAST_DUE→CANCELLED (CANCELLED terminální, PAST_DUE↔ACTIVE obousměrné). `Subscription.planTier` sdílí typ s `core/tenant/types.ts` `TenantPlan.planTier`. Striktně BEZ vazby na Invoice/Order.
+- `core/canonical/entities/Customer.ts` — B2B jako `BusinessProfile` (company/taxIdentifiers/pricingContext/paymentTerms) navázaný na Customer, NENÍ nová doména ani druhý pricing engine. `pricingContext` je jen reference (FK-like), žádná vlastní cenová logika.
+- `tests/unit/Phase6DomainSkeleton.test.ts` — 26 testů (strukturální vztahy + `evaluateTransition()` lifecycle ověření pro všechny 4 stavové osy).
+- `npm run build` čistý, `npm test` 466/466 (`omega-executor-sanity.test.ts` vyžaduje vyšší než default 5s timeout pod aktuální systémovou zátěží stroje, nesouvisí se Fází 6.1 změnou — ověřeno izolovaně s `--testTimeout=15000`, 9/9 zelených).
 
-Marketing (`domains/marketing/`) a samostatná B2B doména (`domains/b2b/`) zůstávají prázdné — Jose rozhodl: B2B je rozšíření Customer, ne vlastní doména; Marketing nebylo v zadání "Další kroky Fáze 6" zmíněno jako samostatná kostra.
+Marketing (`domains/marketing/`) a samostatná B2B doména (`domains/b2b/`) zůstávají prázdné — Jose rozhodl: B2B je rozšíření Customer, ne vlastní doména; Marketing nebylo v zadání zmíněno jako samostatná kostra.
 
-**Explicitně MIMO SCOPE** (Jose bod 5: "Nepřidávej žádnou neodsouhlasenou funkcionalitu") — neimplementováno, čeká na další zadání: automatické workflow faktur, souhrnné faktury, email marketing, retargeting, affiliate, B2B schvalování, vlastní účetnictví, jakékoliv Rules/business logika nad těmito entitami.
+**Explicitně MIMO SCOPE** (Jose: "Neimplementovat zatím") — neimplementováno, čeká na další zadání: konkrétní promo výpočty (PromoGroup priority tie-break algoritmus), marketingové distribuční kanály, skladové přesuny/rezervace/alokace, automatická fakturace, payment gateway, usage billing, B2B approval workflow, B2B credit limity, retargeting/email/affiliate, jakékoliv Rules/business logika nad těmito entitami.
 
 ## Co explicitně NEPŘENÁŠET
 
