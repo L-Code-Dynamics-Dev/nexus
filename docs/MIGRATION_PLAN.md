@@ -100,7 +100,24 @@ Testy: 88 nových/upravených (Campaign 22→25, Invoice 11→14, Warehouse 6→
 
 **Explicitně MIMO SCOPE** (Jose: "Neimplementovat zatím", nezměněno Fází 6.3) — konkrétní promo výpočty/ceny, marketingové distribuční kanály, skladové přesuny/rezervace/alokace, automatická fakturace, payment gateway, usage billing, B2B approval workflow, B2B credit limity, retargeting/email/affiliate, validace formátu BusinessProfile polí.
 
-Další krok (Jose): **Fáze 6.4 — konkrétní business scénáře nad těmito rozhodnutími.** Žádné nové domény ani abstrakce.
+**Business Flows (Fáze 6.4) — HOTOVO** (2026-09-05, Josovo zadání "skutečné business flows... jen flows, které mají přímou oporu v dosavadních rozhodnutích", implementováno 3 paralelními forky na nezávislé domény). Žádné nové business rozhodnutí, žádná nová abstrakce — čistá kompozice existujících Rules do use-case výsledků:
+
+- `domains/campaign/CampaignFlows.ts`:
+  - `resolveCampaignPromoGroupForProduct()` — Campaign→PromoGroup→Product: filtruje `campaign.promoGroupIds` na skupiny obsahující daný produkt, volá `resolveConflict()`.
+  - `evaluateCampaignForProduct()` — Campaign evaluation ACTIVE/PAUSED: `shouldEvaluateCampaign()` jako krátké zkrácení, PAUSED/DRAFT/ENDED nevolá `resolveConflict()` vůbec.
+  - `publishCreative()` — Creative publication: tenký wrapper nad `CreativeLifecycleRule` s `targetStatus: 'PUBLISHED'`.
+  - (PromoGroup conflict resolution jako samostatný flow VYNECHÁN — `resolveConflict()` z Fáze 6.3 už JE ten obecný use-case, další alias by byl čistá duplicita jména.)
+- `domains/invoice/OrderInvoiceOmegaFlow.ts` — `evaluateOrderInvoiceOmegaFlow()` — Order→Invoice→Omega reference: use-case wrapper nad `InvoiceLifecycleRule` s explicitním Order/omegaDocumentId kontextem.
+- `domains/warehouse/WarehouseStockFlow.ts` — `evaluateWarehouseStockLink()` (1:1) + `resolveWarehouseStockLinks()` (pole-varianta, čistý `Array.map()`, žádná agregace/nová logika) — Warehouse→StockPosition.
+- `domains/billing/TenantSubscriptionPlanFlow.ts` — `evaluateTenantSubscriptionPlanFlow()` — Tenant→Subscription→Plan: skládá `SubscriptionLifecycleRule` (určuje `allowed`) + `isConsistentWithTenantPlan()` (jen reportuje, NIKDY neblokuje — potvrzeno testem "allowed zůstává true i při nekonzistenci").
+- `domains/b2b/CustomerBusinessContextFlow.ts` — `resolveCustomerBusinessContext()` — Customer→BusinessProfile→ostatní domény: skládá `isBusinessCustomer()` + `BusinessProfileValidationRule` + `getB2BPricingContext()`, validace neblokuje čtení pricingContext.
+
+Testy: 43 nových (Campaign 11, Invoice 8, Warehouse 7, Billing 10, B2B 7).
+`npm run build` čistý, `npm test` 594/594 (585 hlavní běh + 9 omega-executor izolovaně s vyšším timeoutem kvůli systémové zátěži stroje).
+
+**Explicitně MIMO SCOPE** (Jose: "zatím vůbec neřešit", nezměněno Fází 6.4) — konkrétní promo výpočet, platební provider, subscription payment flow, B2B schvalování/limity, skladové přesuny, marketingové kanály, TRIAL mapping, PAST_DUE/GRACE_PERIOD jistota.
+
+Cesta 6.0 kostra → 6.1 lifecycle → 6.2 business rules → 6.3 rozhodnutí → 6.4 business flows je uzavřená bez domýšlení na žádném kroku. Další krok čeká na Josovo zadání.
 
 ## Co explicitně NEPŘENÁŠET
 
