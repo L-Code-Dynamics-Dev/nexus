@@ -50,16 +50,69 @@ export interface TenantIntegrationConfig {
 
 /**
  * Plán/limity SaaS tenanta (§5, §14 billing vazba). Vychází ze SafeOrder
- * migrations/0008 — jediný zdrojový systém, který měl plán tiers hotové.
+ * migrations/0008_saas_onboarding_plans_and_lifecycle.sql `tenant_plans`
+ * tabulky (ověřeno přímo v SQL, ne jen podle MIGRATION_PLAN.md popisu) --
+ * jediný zdrojový systém, který měl plán tiers hotové.
  */
 export interface TenantPlan {
     tenantId: TenantId;
     planTier: PlanTier;
     monthlyEvaluationLimit: number;
     monthlyEvaluationsUsed: number;
+    historyRetentionDays: number;
+    networkAccessAllowed: boolean;
+    customRulesAllowed: boolean;
     status: 'ACTIVE' | 'GRACE_PERIOD' | 'SUSPENDED' | 'CANCELED';
     billingPeriodStart: ISODateTime;
     billingPeriodEnd: ISODateTime;
+}
+
+/**
+ * Bezpečnostní/risk politika tenanta -- SafeOrder migrations/0001_initial_schema.sql
+ * `tenant_policies` tabulka (ověřeno v SQL, ne domněnka). SafeOrder je jediný
+ * zdrojový systém s per-tenant konfigurovatelnou risk politikou -- Nexus
+ * ji přebírá jako obecný vzor pro "tenant-owned business threshold
+ * konfigurace", ne jen pro SafeOrder doménu samotnou.
+ */
+export interface TenantPolicy {
+    tenantId: TenantId;
+    policyVersion: string;
+    reviewThreshold: number;
+    restrictThreshold: number;
+    signalRetentionDays: number;
+    codPolicyAction: 'RESTRICT_COD' | 'REQUIRE_PREPAYMENT' | 'FLAG_ONLY';
+    networkEnabled: boolean;
+    networkOptedInAt?: ISODateTime;
+}
+
+/**
+ * Verzovaná historie změn `TenantPolicy` -- SafeOrder migrations/0008
+ * `tenant_policy_history` tabulka. Append-only audit trail (viz
+ * core/audit/AuditRecord.ts pro obecný append-only vzor) -- KAŽDÁ změna
+ * policy musí zůstat dohledatelná, ne jen aktuální hodnota.
+ */
+export interface TenantPolicyHistoryEntry {
+    id: EntityId;
+    tenantId: TenantId;
+    policyVersion: string;
+    configurationDiff: Record<string, unknown>;
+    updatedBy: string;
+    createdAt: ISODateTime;
+}
+
+/**
+ * Tenant-scoped náhrada za hardcoded `TIER_PRICELIST_MAP` (legacy Pricing
+ * Engine, viz core/canonical/entities/Price.ts komentář + Confirmed
+ * Conflict #3 v CANONICAL-MODEL-CONTRACT.md §6). `tierKey` odpovídá
+ * `PriceList.tenantScopedTierKey` -- tahle mapa říká, na jaké EXTERNÍ
+ * (Shoptet) pricelist ID se daný tenant-specific tier klíč má napojit.
+ * Dva tenanti mohou mít pro stejný `tierKey` (např. "ZR20") jiné
+ * `externalPricelistId`, protože jde o jejich vlastní Shoptet konfiguraci.
+ */
+export interface TenantScopedTierConfig {
+    tenantId: TenantId;
+    /** tierKey -> externí (Shoptet) pricelist ID. */
+    tierToExternalPricelistId: Record<string, string>;
 }
 
 /**
