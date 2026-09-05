@@ -12,7 +12,7 @@ Zdrojový audit: `~/nexus-audit/*.md` (2026-09-04) + přímé ověření proti k
 | SafeOrder | `~/safeorder-3.0` | Kompletní, testovaný, nikdy živě nenasazen | 5-stage pipeline, blind-token privacy, `CalibrationEngine` (per-merchant), risk graph s time-decay |
 | AIE / Availability + Procurement | `~/availability-intelligence-engine` | Jádro (Procurement/Availability) testované a hotové; frontend "Nexus" je vizuální shadow-test bez napojení na backend | Hexagonální ports/adapters, `ProcurementEngine.plan/receive`, idempotency claim/complete pattern |
 | Shoptet integrace / GOLIÁŠ | `~/shoptet-variant-matrix`, `~/shoptet-cart-bypass-poc`, `~/Lay-Spa` | GOLIÁŠ produkčně nasazen (hecmania.cz); cart-bypass-poc je HMAC shipping calculator ve shadow mode | Cart-write adapter vzor (nativní API → DOM fallback), HMAC+nonce+rate-limit vzor |
-| Omega účetní integrace | `~/omega-bridge` | 5-stage gate pipeline hotová, `OmegaExecutor` je simulace (mock) | Hash triáda (source/canonical/target payload), karanténní state machine, blind-retry fix |
+| Omega účetní integrace | `~/omega-bridge` | 5-stage gate pipeline hotová, `OmegaExecutor` reálný spawn implementován (2026-09-05, NEOVĚŘENO proti reálnému Windows agentovi) | Hash triáda (source/canonical/target payload), karanténní state machine, blind-retry fix |
 
 ## Opakující se vzorec napříč VŠEMI systémy (= základ NEXUS Core)
 

@@ -56,7 +56,7 @@ Vybráno jako první proto, že má nejvyšší produkční zralost (1361 commit
 ### Fáze 5 — Omega/ERP adapter
 - **OLD**: `~/omega-bridge/src/adapters/targets/omega/{OmegaMapper,OmegaAdapter}.ts`
 - **Zachovat beze změny**: R01/R02 generátor, sanitizace, Windows-1250 encoding, hash triáda
-- **NEW BUILD**: `OmegaExecutor.ts` je simulace — reálné `child_process.spawn` na Windows agentovi je nová práce, ne migrace
+- **`OmegaExecutor.ts` reálný `child_process.spawn` — HOTOVO** (2026-09-05): `connectors/omega/legacy/agent/OmegaExecutor.ts`, NEW BUILD (ne migrace simulace). Threat model pokrytý přímo v souboru (timeout+SIGTERM/SIGKILL, spawn-failure bez crashe procesu, whitelist na přesný basename místo `.endsWith()`, output cap proti runaway procesu) — 9/9 sanity testů (`tests/regression/connectors/omega-executor-sanity.test.ts`) proti mock Node skriptům. **NEOVĚŘENO PROTI REÁLNÉMU WINDOWS AGENTOVI** — žádný takový stroj nebyl při psaní dostupný; před prvním ostrým během nutno ověřit proti skutečnému `AkciaOmega.bat` (skutečný formát stdout/logu, chování při zamčeném Pohoda souboru).
 
 ### Fáze 6+ — Billing, Marketing, B2B, Campaign, Creative
 **Čistě NEW BUILD.** Žádný zdrojový systém neobsahuje kód k migraci. Postavit až po Fázi 0-5, na hotovém Canonical Model + Connector Layer — jinak vzniknou stejné hardcoded/single-tenant chyby, co řešíme u Pricing Engine dnes.
