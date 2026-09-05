@@ -81,3 +81,30 @@ export interface QuantityTierSourceConfig {
     applyQuantityDiscount?: boolean;
     applyVolumeDiscount?: boolean;
 }
+
+/**
+ * QuantityTierGroup -- PLACEHOLDER pro Hecmania Cross-Variant hypotézu C
+ * (viz docs/design-proposals/QuantityTier-Hecmania.md §3-4). NENÍ
+ * produkční rozhodnutí -- členství (`memberProductSkus`) je zatím
+ * explicitní ruční seznam, protože skutečná Hecmania feed data (a tedy
+ * odpověď na "jak se group definuje reálně" z design proposalu §4) ještě
+ * nejsou k dispozici. Až budou, tahle entita se buď potvrdí, nebo přepracuje
+ * -- nepoužívat v produkčním pricing chainu (createNexusPricingCalculator)
+ * dokud nepadnou rozhodnutí v design proposalu §8.
+ *
+ * Breakpointy jsou zatím společné pro celou group, nezávislé na ceníku/
+ * customerTier -- odpovídá pracovní hypotéze z design proposalu §5, taky
+ * NEPOTVRZENO.
+ */
+export interface QuantityTierGroup extends CanonicalEntity {
+    readonly name: string;
+    readonly memberProductSkus: string[];
+    readonly breakpoints: QuantityTierBreakpoint[];
+}
+
+/** minQuantity je inclusive; maxQuantity undefined = "a víc" (poslední breakpoint). */
+export interface QuantityTierBreakpoint {
+    readonly minQuantity: number;
+    readonly maxQuantity?: number;
+    readonly discountPercent: number;
+}
