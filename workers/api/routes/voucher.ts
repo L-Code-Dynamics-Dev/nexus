@@ -590,55 +590,113 @@ interface ConsumeResult {
  * před ní. Předsazená kontrola otevírá TOCTOU okno mezi kontrolou a zápisem.
  * `CreditVoucherRedemptionRule` výše slouží k ČITELNÉ HLÁŠCE, autorita je tady.
  *
- * UPDATE a INSERT jdou JEDNÍM `batch()` -- to je v D1 jedna implicitní
- * transakce. Dvěma `run()` by mohl projít odečet bez transakčního záznamu
- * (nebo naopak), a reconciliační invariant z CreditVoucher.ts by se rozešel.
+ * KRITICKÉ -- UPDATE a INSERT NESMÍ JÍT JEDNÍM `batch()`:
+ *   D1 `batch()` se rollbackuje POUZE při SQL chybě. `UPDATE ... WHERE
+ *   version = ?`, který nematchne žádný řádek, SQL chyba NENÍ -- vrátí
+ *   `meta.changes === 0` a batch normálně projde. V jednom batchi by tedy
+ *   při konfliktu verze prošel INSERT transakce BEZ odečtu kreditu.
+ *
+ *   A je to horší než "jen" rozejitý invariant: ten INSERT zabere partial
+ *   unique index (voucher_id, order_id), takže NÁSLEDNÝ RETRY spadne na
+ *   constraintu a `isUniqueConstraintViolation` ho vyhodnotí jako
+ *   "idempotentní replay" -> vrátí `consumed: true`. Objednávka projde
+ *   jako zaplacená kreditem, který se nikdy neodečetl.
+ *
+ *   Pořadí je proto NEMĚNNÉ: UPDATE -> ověřit `meta.changes === 1` ->
+ *   teprve INSERT. Zapsáno i v kontraktu `CreditVoucherStore`.
+ *
+ * DŮSLEDEK: mezi UPDATE a INSERT je okno, ve kterém může Worker umřít --
+ * kredit odečten, transakce nezapsaná. To je vědomě zvolený SMĚR CHYBY:
+ * chybějící záznam odchytí reconciliace (`core/reconciliation`) a řeší se
+ * dohledáním, zatímco opačná varianta (záznam bez odečtu) tiše rozdává
+ * zboží zdarma. Nikdy nepřehazovat pořadí "aby to bylo konzistentnější".
  *
  * IDEMPOTENCE: partial unique index `uq_voucher_redemption(voucher_id,
  * order_id) WHERE type='REDEEMED'` -- druhé doručení téhož webhooku shodí
- * INSERT na constraintu, takže se celý batch (včetně UPDATE) vrátí zpět
- * a kredit je odečten právě jednou.
+ * INSERT na constraintu. Protože UPDATE už proběhl, musí se ten odečet
+ * KOMPENZOVAT (viz obsluha violation níže), ne vrátit jako úspěch.
  */
 async function consumeCredit(db: D1Database, input: ConsumeInput): Promise<ConsumeResult> {
     let expectedVersion = input.expectedVersion;
 
     for (let attempt = 1; attempt <= MAX_REDEMPTION_ATTEMPTS; attempt += 1) {
         try {
-            const statements = [
-                db
-                    .prepare(
-                        `UPDATE vouchers
-                            SET current_balance_minor = current_balance_minor - ?3,
-                                version = version + 1,
-                                status = CASE WHEN current_balance_minor - ?3 = 0
-                                              THEN 'DEPLETED' ELSE status END
-                          WHERE tenant_id = ?1
-                            AND id = ?2
-                            AND version = ?4
-                            AND status = 'ACTIVE'
-                            AND current_balance_minor >= ?3
-                            AND expires_at > datetime('now')`,
-                    )
-                    .bind(input.tenantId, input.voucherId, input.amountMinor, expectedVersion),
-                db
-                    .prepare(
-                        `INSERT INTO voucher_transactions
-                             (voucher_id, tenant_id, type, amount_minor, currency, order_id)
-                         VALUES (?1, ?2, 'REDEEMED', ?3, ?4, ?5)`,
-                    )
-                    .bind(
-                        input.voucherId,
-                        input.tenantId,
-                        input.amountMinor,
-                        input.currency,
-                        input.orderId,
-                    ),
-            ];
-
-            const [updateResult] = await db.batch(statements);
+            // KROK 1 -- odečet. Samostatně, NIKDY v batchi s INSERTem
+            // (viz hlavičkový komentář: nematchnutý UPDATE není SQL chyba,
+            // takže by se batch nerollbackl a INSERT by prošel bez odečtu).
+            const updateResult = await db
+                .prepare(
+                    `UPDATE vouchers
+                        SET current_balance_minor = current_balance_minor - ?3,
+                            version = version + 1,
+                            status = CASE WHEN current_balance_minor - ?3 = 0
+                                          THEN 'DEPLETED' ELSE status END
+                      WHERE tenant_id = ?1
+                        AND id = ?2
+                        AND version = ?4
+                        AND status = 'ACTIVE'
+                        AND current_balance_minor >= ?3
+                        AND expires_at > datetime('now')`,
+                )
+                .bind(input.tenantId, input.voucherId, input.amountMinor, expectedVersion)
+                .run();
 
             // §7: `meta.changes === 1` je JEDINÝ důkaz úspěchu.
-            if (updateResult !== undefined && updateResult.meta.changes === 1) {
+            if (updateResult.meta.changes === 1) {
+                // KROK 2 -- transakční záznam. Až TEĎ, když je jisté, že se
+                // odečetlo. Selhání na unique indexu tady znamená, že týž
+                // webhook už jednou proběhl -- ale odečet z KROKU 1 je
+                // skutečný a musí se vrátit zpět, jinak by dvojí doručení
+                // webhooku odečetlo kredit dvakrát.
+                try {
+                    await db
+                        .prepare(
+                            `INSERT INTO voucher_transactions
+                                 (voucher_id, tenant_id, type, amount_minor, currency, order_id)
+                             VALUES (?1, ?2, 'REDEEMED', ?3, ?4, ?5)`,
+                        )
+                        .bind(
+                            input.voucherId,
+                            input.tenantId,
+                            input.amountMinor,
+                            input.currency,
+                            input.orderId,
+                        )
+                        .run();
+                } catch (insertError) {
+                    const insertMessage = errorMessage(insertError);
+                    if (isUniqueConstraintViolation(insertMessage)) {
+                        // KOMPENZACE odečtu z KROKU 1. Bez ní by opakovaný
+                        // webhook ukrojil kredit podruhé, přestože transakce
+                        // je v historii jen jednou.
+                        await compensateRedemption(db, input);
+                        log('info', 'voucher.redeem.idempotent_replay', {
+                            tenantId: input.tenantId,
+                            orderId: input.orderId,
+                            voucherId: redactVoucherCode(input.voucherId),
+                            compensated: true,
+                        });
+                        const fresh = await readVoucherRow(db, input.tenantId, input.voucherId);
+                        return {
+                            consumed: true,
+                            newBalanceMinor: fresh?.current_balance_minor ?? 0,
+                            attempts: attempt,
+                        };
+                    }
+                    // Jiná chyba INSERTu: kredit JE odečtený, záznam chybí.
+                    // Vědomě zvolený směr chyby (viz hlavička) -- odchytí
+                    // reconciliace. Hlásí se jako alert, ne jako tichý stav.
+                    log('error', 'voucher.redeem.transaction_write_failed', {
+                        tenantId: input.tenantId,
+                        orderId: input.orderId,
+                        voucherId: redactVoucherCode(input.voucherId),
+                        amountMinor: input.amountMinor,
+                        message: insertMessage,
+                        alert: true,
+                    });
+                    throw insertError;
+                }
+
                 const fresh = await readVoucherRow(db, input.tenantId, input.voucherId);
                 return {
                     consumed: true,
@@ -675,22 +733,13 @@ async function consumeCredit(db: D1Database, input: ConsumeInput): Promise<Consu
         } catch (error) {
             const message = errorMessage(error);
 
-            // Constraint na partial unique indexu = TENTO WEBHOOK UŽ PROBĚHL.
-            // Není to chyba, je to idempotence fungující podle návrhu.
-            if (isUniqueConstraintViolation(message)) {
-                log('info', 'voucher.redeem.idempotent_replay', {
-                    tenantId: input.tenantId,
-                    orderId: input.orderId,
-                    voucherId: redactVoucherCode(input.voucherId),
-                });
-                const fresh = await readVoucherRow(db, input.tenantId, input.voucherId);
-                return {
-                    consumed: true,
-                    newBalanceMinor: fresh?.current_balance_minor ?? 0,
-                    attempts: attempt,
-                };
-            }
-
+            // POZOR -- unique violation se ZDE VĚDOMĚ NEODCHYTÁVÁ jako úspěch.
+            // Idempotenci dvojího webhooku řeší vnitřní catch kolem INSERTu
+            // (KROK 2), který jediný ví, že odečet z KROKU 1 proběhl, a umí
+            // ho zkompenzovat. Kdyby se violation vyhodnocovala i tady,
+            // vrátil by se `consumed: true` bez důkazu, že se kredit skutečně
+            // odečetl -- objednávka by prošla jako zaplacená kreditem, který
+            // nikdo neodečetl. Sem doputují jen skutečné chyby úložiště.
             log('error', 'voucher.d1.consume_failed', {
                 tenantId: input.tenantId,
                 voucherId: redactVoucherCode(input.voucherId),
@@ -708,6 +757,65 @@ async function consumeCredit(db: D1Database, input: ConsumeInput): Promise<Consu
         attempts: MAX_REDEMPTION_ATTEMPTS,
         reason: `Čerpání se nepodařilo po ${MAX_REDEMPTION_ATTEMPTS} pokusech (souběh).`,
     };
+}
+
+/**
+ * Vrátí zpět odečet z KROKU 1, když INSERT transakce spadl na partial unique
+ * indexu -- tedy když týž webhook už jednou proběhl.
+ *
+ * PROČ TO MUSÍ EXISTOVAT: kroky jsou vědomě oddělené (nematchnutý UPDATE není
+ * v D1 SQL chyba, takže `batch()` by transakci zapsal i bez odečtu -- viz
+ * hlavička `consumeCredit`). Cenou za to je, že při opakovaném doručení
+ * webhooku odečet z KROKU 1 SKUTEČNĚ PROBĚHNE, i když transakce už v historii
+ * je. Bez téhle kompenzace by druhé doručení ukrojilo kredit podruhé.
+ *
+ * Kompenzace je záměrně BEZ optimistického zámku a bez zápisu transakce:
+ *   - `version` se nekontroluje: vracíme přesně tolik, kolik jsme právě
+ *     odečetli, a kdyby mezitím proběhlo jiné čerpání, `version` by seděla
+ *     stejně málo jako `current_balance_minor` -- podmínka na horní mez
+ *     (`<= initial`) je bezpečnější a nezacyklí se.
+ *   - transakce se NEZAPISUJE: v historii nemá vzniknout ani REDEEMED (ten
+ *     už tam je z prvního doručení), ani REFUNDED (žádná refundace se
+ *     nestala). Reconciliační invariant tak zůstává v pořádku.
+ *
+ * Selhání kompenzace se NESMÍ propagovat jako chyba requestu -- webhook by
+ * se retryoval a odečetl potřetí. Loguje se jako alert; rozdíl odchytí
+ * reconciliace.
+ */
+async function compensateRedemption(db: D1Database, input: ConsumeInput): Promise<void> {
+    try {
+        const result = await db
+            .prepare(
+                `UPDATE vouchers
+                    SET current_balance_minor = current_balance_minor + ?3,
+                        version = version + 1,
+                        status = CASE WHEN status = 'DEPLETED' THEN 'ACTIVE' ELSE status END
+                  WHERE tenant_id = ?1
+                    AND id = ?2
+                    AND current_balance_minor + ?3 <= initial_balance_minor`,
+            )
+            .bind(input.tenantId, input.voucherId, input.amountMinor)
+            .run();
+
+        if (result.meta.changes !== 1) {
+            log('error', 'voucher.redeem.compensation_missed', {
+                tenantId: input.tenantId,
+                orderId: input.orderId,
+                voucherId: redactVoucherCode(input.voucherId),
+                amountMinor: input.amountMinor,
+                alert: true,
+            });
+        }
+    } catch (error) {
+        log('error', 'voucher.redeem.compensation_failed', {
+            tenantId: input.tenantId,
+            orderId: input.orderId,
+            voucherId: redactVoucherCode(input.voucherId),
+            amountMinor: input.amountMinor,
+            message: errorMessage(error),
+            alert: true,
+        });
+    }
 }
 
 /** Rozliší TRVALÝ důvod od pouhého version konfliktu. `null` = jen verze. */
@@ -746,9 +854,11 @@ interface HoldAuditInput {
  * odsud by změnila 409 HOLD na 503, což by webhook odesílatel retryoval
  * a HOLD by se ztratil v šumu.
  *
- * POZNÁMKA: tabulka `voucher_audit` v migraci 0001 dnes NENÍ. Do jejího
- * doplnění je perzistentním záznamem strukturovaný log; zápis se o to
- * pokusí a případné selhání jen zaloguje.
+ * Tabulka `voucher_audit` je v migraci 0002 -- vědomě oddělená od
+ * `voucher_transactions`: ta je finanční historie (jen skutečné pohyby,
+ * drží reconciliační součet), tahle je provozní (události BEZ finančního
+ * dopadu, které musí být dohledatelné). Selhání zápisu se jen loguje,
+ * nikdy neshodí HOLD -- 503 by webhook retryoval a HOLD by se ztratil.
  */
 async function writeHoldAudit(db: D1Database, input: HoldAuditInput): Promise<void> {
     try {

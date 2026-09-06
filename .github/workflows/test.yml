@@ -1,0 +1,50 @@
+name: test
+
+# PROČ CI EXISTUJE (2026-09-06, Fáze A voucheru):
+#   Workers/D1 testy (tests/workers/**) potřebují Cloudflare workerd runtime,
+#   který vyžaduje macOS 13.5+. Vývojový stroj (Mac Mini 2014) jede macOS
+#   12.7.6 a NIKDY je nespustí -- není to chyba konfigurace, je to strop
+#   hardwaru. Na Linuxu běží bez problémů, takže jediné místo, kde se
+#   atomicita kreditu dá reálně ověřit, je tenhle workflow.
+#
+#   Dokud tenhle job neproběhne zeleně, jsou tvrzení o atomickém čerpání
+#   podložená jen dokumentací D1, ne důkazem.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  node:
+    name: Node testy (core / domains / connectors)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: TypeScript (root)
+        run: npx tsc --noEmit
+      - name: TypeScript (workers)
+        run: npx tsc --noEmit -p tests/workers/tsconfig.json
+      - name: Testy
+        run: npm test
+
+  workers:
+    name: Workers/D1 testy (workerd runtime)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # Tohle je jediné místo, kde se ověří, že CHECK constrainty, partial
+      # unique indexy a meta.changes fungují proti REÁLNÉ D1, ne proti mocku.
+      - name: Workers testy
+        run: npm run test:workers

@@ -1,5 +1,33 @@
 # NEXUS — Progress Log
 
+## ZNÁMÝ BLOKÁTOR — Workers/D1 testy nejdou spustit lokálně
+
+**Mac Mini 2014 jede macOS 12.7.6. Cloudflare workerd vyžaduje macOS 13.5+.**
+
+```
+Unsupported macOS version: The Cloudflare Workers runtime cannot run on the
+current version of macOS (12.6.0). The minimum requirement is macOS 13.5.0+.
+```
+
+Není to chyba configu ani testů — ověřeno, že pipeline projde celá až k bodu,
+kde miniflare spouští binárku runtime (config se načte, `readD1Migrations()`
+proběhne, plugin se zaregistruje, pool nastartuje). `npx tsc --noEmit -p
+tests/workers/tsconfig.json` je čistý, typy včetně `cloudflare:test` a
+`D1Database` sedí.
+
+**Důsledek:** `tests/workers/schema.test.ts` (19 testů) je hotový, ale
+**NEOVĚŘENÝ BĚHEM**. Týká se to i kritického nálezu o `batch()` — dokud
+neproběhne, je to hypotéza podložená dokumentací D1, ne důkaz.
+
+**Řešení:** `.github/workflows/test.yml` — job `workers` běží na
+`ubuntu-latest`. Do prvního zeleného běhu platí u atomicity kreditu status
+**NOT PROVEN**, stejně jako u replay ochrany v `shoptet-cart-bypass-poc`.
+
+Lokálně funguje `npm test` (node testy) bez omezení.
+
+---
+
+
 ## 2026-09-06 — Digital Voucher: návrh uzavřen, Fáze A rozpracovaná
 
 ### Stav: větev `chore/vitest-4-upgrade`, NEMERGOVÁNO do main
