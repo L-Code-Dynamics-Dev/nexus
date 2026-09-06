@@ -131,6 +131,16 @@ Testy: 14 nových (`PromoGroupDiscountRule.test.ts` 9 + `CampaignFlows.test.ts` 
 
 **UNRESOLVED** (defenzivní implementace, ne potvrzené business pravidlo — Jose to explicitně nezopakoval pro tuto konkrétní Rule): horní hranice PERCENTAGE (0 ≤ value < 1) a FIXED_AMOUNT clamp na 0 jsou odvozeny z konvence jiných existujících Rules (DiscountLimitRule/D1 schema), ne z tohoto konkrétního zadání.
 
+**Hraniční testovací matice (Fáze 6.5 pokračování) — HOTOVO** (2026-09-06, Josovo zadání "Nejprve doplnit testovací matici přesně na hraniční kombinace" před pokračováním na Creative). End-to-end ověření celého kandidátního cenového modelu napříč Pricing chainem (Fáze 1), PromoGroup (Fáze 6.5) a QuantityTier (design proposal placeholder):
+
+- `connectors/pricing-engine/legacy/promo/free-units.ts` + `domains/pricing/XPlusXRule.ts` (nové) — X+X ("2+1 zdarma") přeneseno 1:1 z `~/hecmania-quantity-pricing` jako legacy port (analogicky k VoucherCouponPolicy). Per-varianta paid/free split, nezávislé na ceně. `inScope: false` explicitně odlišuje "produkt mimo X+X scope" od "v scope, 0 kusů".
+- `domains/pricing/BestCandidatePriceRule.ts` (nový) — finální krok kandidátního modelu: `currentPrice` je VŽDY jeden z kandidátů, absolutní minimum napříč `PROMO_GROUP`/`QUANTITY_TIER`/`CURRENT_PRICE` — nikdy sčítání procent, nikdy zdražení. Přesná shoda → `CURRENT_PRICE` vyhrává (deterministické).
+- `tests/integration/PromoQuantityBoundaryMatrix.test.ts` (nový) — 10/10 hraničních scénářů z Josova zadání, doslovně: (1) běžná cena + loyalty + quantity, (2) akční cena + loyalty (VAGNER pravidlo respektováno), (3) akční cena + quantity (počítáno ze sale ceny, ne z basePrice), (4) loyalty + PromoGroup, (5) loyalty + PromoGroup + QuantityTier (nejnižší vyhrává, ne součet), (6) X+X + QuantityTier (quantity počítáno z CELKOVÉHO počtu včetně X+X zdarma kusů), (7) produkt mimo X+X scope, (8) více PromoGroup → priority → výpočet, (9) PAUSED campaign → žádná promo cena, (10) kandidát vyšší než currentPrice → nesmí zdražit.
+- Testy: 23 nových (X+X parity 5, BestCandidatePriceRule 8, boundary matrix 10).
+- `npm run build` čistý, `npm test` 631/631 (622 hlavní běh + 9 omega-executor izolovaně, ověřeno s `--testTimeout=30000` kvůli extrémní systémové zátěži stroje v době běhu — load average přes 600, ne regrese).
+
+Testovací matice záměrně používá existující `policy-v1.json`/ZR tier konfiguraci (jediná funkční Pricing chain konfigurace v repu) — jde o ověření produkčního kódu, ne o vlastní klientská data.
+
 **Zbývající Domain Rules (Fáze 6.5 pokračování, JEDNA doména najednou, podle Josova pořadí):** Creative (skutečné použití obsahu/placement) → B2B (obchodní pravidla firemních zákazníků) → Invoice/Omega (skutečný dokladový workflow) → Warehouse (skutečná skladová logika) → Billing/Subscription (skutečný SaaS billing). Každá čeká na explicitní business zadání od Jose před implementací — žádné domýšlení.
 
 ## Co explicitně NEPŘENÁŠET
