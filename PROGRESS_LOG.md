@@ -1,5 +1,52 @@
 # NEXUS — Progress Log
 
+## 2026-09-07 — Fáze A HOTOVÁ, CI zelené, atomicita OVĚŘENA
+
+Repo: **https://github.com/hlancaric-ship-it/nexus** (privátní),
+větev `chore/vitest-4-upgrade` (nemergováno do main).
+
+| Job | Výsledek |
+|---|---|
+| Node testy | 754/754 |
+| TypeScript (root + workers) | čistý |
+| **Workers/D1 v workerd runtime** | **19/19** |
+
+### Nález o `batch()` je PROKÁZANÝ, ne odvozený z docs
+
+`tests/workers/schema.test.ts` běžel proti reálné D1 na CI. Výsledek:
+
+```
+odectenoMinor: 0,  zapsanychCerpani: 1
+```
+
+Batch s konfliktní verzí: UPDATE vrátí `changes === 0`, **oba statementy
+hlásí `success: true`**, zůstatek se nezmění — a transakce o čerpání se
+**zapíše**. Kontrastní test potvrdil, že skutečná SQL chyba batch rollbackne.
+Je to tedy sémantika D1, ne náhoda.
+
+Kdyby čerpání zůstalo jako `db.batch([UPDATE, INSERT])` (tak to napsal
+agent), šel by voucher utratit donekonečna — a horší: zabraný unique index
+by způsobil, že retry vyhodnotí situaci jako idempotentní replay a vrátí
+`consumed: true`. Opraveno v `ca70a5b`.
+
+Ověřeno dále: CHECK constrainty drží, partial unique index funguje
+(dva ISSUED s NULL projdou, druhý REDEEMED na stejnou objednávku ne),
+optimistický zámek nedovolí lost update, tenant izolace v indexech sedí.
+
+**Status atomického čerpání: NOT PROVEN → OVĚŘENO.**
+
+### Zbývá k Fázi B
+
+1. **Durable Object** pro nonce + rate limit — dnes jen kontrakt v
+   `workers/api/types.ts`. Bez něj má `/validate` otevřené dveře pro hrubou
+   sílu; jedinou obranou je entropie kódu (§4 rate limit vyžaduje).
+2. **Shoptet injector** — selektory ověřené průzkumem (`.discount-coupon form`,
+   `data-testid`, `data-micro-sku`, `ShoptetDOMCartContentLoaded`).
+3. **Validace instalace v našem UI** (požadavek Lucky) — ověřit kredit produkt,
+   kategorii, kupón a nasazený JS; při změně odmítnout čerpání a hlásit.
+
+---
+
 ## ZNÁMÝ BLOKÁTOR — Workers/D1 testy nejdou spustit lokálně
 
 **Mac Mini 2014 jede macOS 12.7.6. Cloudflare workerd vyžaduje macOS 13.5+.**
