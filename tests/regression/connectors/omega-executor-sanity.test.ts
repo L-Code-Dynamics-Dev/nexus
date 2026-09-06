@@ -15,7 +15,16 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { OmegaExecutor } from '../../../connectors/omega/legacy/agent/OmegaExecutor.js';
 
-describe('OmegaExecutor — sanity (mock scripts, NOT real Windows agent)', () => {
+// Timeout 20s pro celý describe (ne vitest default 5s): každý test tady
+// spawnuje skutečný Node proces (mock AkciaOmega.bat) -- tj. plný boot
+// interpreteru + pipe. Izolovaně je to rychlé (spawn ~70 ms, output cap
+// ~115 ms na 2 MiB), ale pod plnou sadou (paralelní workery, Mac Mini 2014)
+// stejné volání reálně trvá 1,5-6,2 s a náhodně přeteče přes 5s hranici.
+// Ověřeno měřením s 60s limitem: execute() doběhne za 4184 ms se správným
+// výsledkem (stdout 1049 B = 1024B cap + marker) -- NEJDE tedy o zaseknutý
+// proces ani o díru v output capu, jen o CPU contention na pomalém stroji.
+// Produkční kód (OmegaExecutor.ts) proto zůstal beze změny.
+describe('OmegaExecutor — sanity (mock scripts, NOT real Windows agent)', { timeout: 20_000 }, () => {
     let tmpDir: string;
     let logPath: string;
 
