@@ -50,6 +50,7 @@ import {
     type CreditVoucherRedemptionRuleInput,
     type CreditVoucherRedemptionRuleResult,
 } from '../../../domains/voucher/CreditVoucherRedemptionRule.js';
+import { isValidVoucherCodeFormat } from '../../../domains/voucher/CreditVoucherCodeGenerator.js';
 import type { Money } from '../../../core/canonical/entities/base.js';
 
 // ---------------------------------------------------------------------------
@@ -76,7 +77,34 @@ const AMOUNT_TOLERANCE_MINOR = 1;
 const MAX_REDEMPTION_ATTEMPTS = 3;
 
 /** Formát kódu `NEXUS-XXXX-XXXX-RRRR` (§4, 8 znaků bez zaměnitelných 0/O/1/I/L). */
-const VOUCHER_CODE_PATTERN = /^NEXUS-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}-\d{4}$/;
+// Formát kódu má JEDINOU definici -- v generátoru. Dřív tu byl vlastní
+// regulární výraz `[2-9A-HJ-NP-Z]`, který byl NADMNOŽINOU skutečné abecedy
+// (povoloval navíc `L` a `U`). Nic to nerozbíjelo, ale byly to dvě definice
+// téhož, které se můžou rozejít -- a u platidla by rozejití znamenalo, že
+// validace přijme tvar, jaký generátor nikdy nevydá.
+//
+// `U` je z abecedy vypuštěné schválně: rukou psané U/V je poslední zbývající
+// záměna po vyloučení 0/O a 1/I/L. Abeceda má proto 30 znaků a 30^8 dává
+// přesně těch ~6,6×10¹¹ kombinací, o kterých mluví §4.
+
+/**
+ * §4 rate limit pro `/validate`. Okno je pro obě úrovně stejné, liší se
+ * jen strop.
+ *
+ * PER IP = 10 / min: legitimní zákazník zadá kód jednou, párkrát při
+ * překlepu. Deset je pohodlná rezerva a přitom sníží rychlost hádání
+ * o několik řádů.
+ *
+ * PER TENANT = 300 / min: strop proti botnetu, kde je každá jednotlivá IP
+ * pod limitem. Číslo musí být nad reálnou špičkou e-shopu (jinak by odřízlo
+ * zákazníky při kampani), ale hluboko pod tím, co potřebuje hrubá síla --
+ * i 300/min znamená ~6,6×10¹¹ / 300 ≈ 4 miliony let na vyčerpání prostoru
+ * kódů. Pokud se u nějakého tenanta ukáže jako těsné, patří to do tenant
+ * konfigurace (§11), ne k rozvolnění konstanty pro všechny.
+ */
+const VALIDATE_RATE_LIMIT_PER_IP = 10;
+const VALIDATE_RATE_LIMIT_PER_TENANT = 300;
+const VALIDATE_RATE_LIMIT_WINDOW_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // D1 řádky
@@ -127,6 +155,52 @@ export async function handleValidate(request: Request, env: Env): Promise<Respon
     const tenantId = requireTenantId(url.searchParams.get('tenant'));
     const cartTotalMinor = parseMinorAmount(url.searchParams.get('cartTotal'), 'cartTotal');
     const cartFingerprint = requireCartFingerprint(url.searchParams.get('cartFingerprint'));
+
+    // §4 RATE LIMIT -- PŘED jakoukoli prací, včetně kontroly formátu kódu.
+    //
+    // Tenhle endpoint prozrazuje zůstatek platidla každému, kdo uhodne kód.
+    // Entropie 8 znaků (~6,6×10¹¹) je obrana proti náhodě, ne proti stroji,
+    // který zkouší tisíce kódů za minutu -- bez rate limitu je §4 nesplněný.
+    //
+    // Dvě nezávislé úrovně, obě musí projít:
+    //   1) per IP -- zastaví jednotlivého útočníka
+    //   2) globálně per tenant -- zastaví botnet rozprostřený přes mnoho IP,
+    //      kde je každá jednotlivá IP pod limitem
+    //
+    // Limity jsou tady schválně přísnější než u běžného API: legitimní
+    // zákazník zadá kód jednou, maximálně párkrát při překlepu.
+    const rateLimiter = resolveNonceStore(env);
+    const clientIp = request.headers.get('cf-connecting-ip') ?? 'unknown';
+
+    const perIp = await rateLimiter.checkRateLimit(
+        `validate:ip:${tenantId}:${clientIp}`,
+        VALIDATE_RATE_LIMIT_PER_IP,
+        VALIDATE_RATE_LIMIT_WINDOW_MS,
+    );
+    if (!perIp.allowed) {
+        log('warn', 'voucher.validate.rate_limited', {
+            scope: 'ip',
+            tenantId,
+            code: redactVoucherCode(code),
+            // Opakované docházení sem je signál hrubé síly, ne provozní šum.
+            alert: true,
+        });
+        return rateLimitedResponse(perIp.retryAfterSeconds);
+    }
+
+    const perTenant = await rateLimiter.checkRateLimit(
+        `validate:tenant:${tenantId}`,
+        VALIDATE_RATE_LIMIT_PER_TENANT,
+        VALIDATE_RATE_LIMIT_WINDOW_MS,
+    );
+    if (!perTenant.allowed) {
+        log('warn', 'voucher.validate.rate_limited', {
+            scope: 'tenant',
+            tenantId,
+            alert: true,
+        });
+        return rateLimitedResponse(perTenant.retryAfterSeconds);
+    }
 
     if (!isWellFormedVoucherCode(code)) {
         // Nevalidní FORMÁT se nedostane do DB vůbec -- šetří to D1 dotazy
@@ -216,6 +290,30 @@ export async function handleValidate(request: Request, env: Env): Promise<Respon
         } satisfies ValidateResponse,
         200,
     );
+}
+
+/**
+ * Odpověď při vyčerpaném rate limitu (§4).
+ *
+ * HTTP 429 + `Retry-After` je standardní tvar, takže se legitimní klient
+ * (náš vlastní frontend) umí zachovat rozumně a nezkouší to hned znovu.
+ *
+ * Tělo VĚDOMĚ neprozrazuje nic o poukazu -- ani jestli kód existoval, ani
+ * jaký byl limit. Útočník se z odpovědi nesmí dozvědět nic, co by hádání
+ * usnadnilo; jediná informace je "zpomal".
+ */
+function rateLimitedResponse(retryAfterSeconds: number | undefined): Response {
+    const retryAfter = retryAfterSeconds ?? Math.ceil(VALIDATE_RATE_LIMIT_WINDOW_MS / 1000);
+    const response = jsonResponse(
+        {
+            valid: false,
+            reasonCode: 'RATE_LIMITED',
+            reason: 'Příliš mnoho pokusů. Zkuste to prosím za chvíli.',
+        },
+        429,
+    );
+    response.headers.set('Retry-After', String(retryAfter));
+    return response;
 }
 
 function invalidResponse(reasonCode: string, reason: string): ValidateResponse {
@@ -939,6 +1037,47 @@ function resolveNonceStore(env: Env): NonceStore {
                 );
             }
         },
+
+        async checkRateLimit(key, limit, windowMs) {
+            try {
+                const stub = namespace.get(namespace.idFromName('global'));
+                const response = await stub.fetch(
+                    `https://voucher-security.internal/rate-limit?key=${encodeURIComponent(key)}&limit=${limit}&windowMs=${windowMs}`,
+                );
+
+                if (!response.ok) {
+                    throw new Error(`rate limit store status ${response.status}`);
+                }
+
+                const data = (await response.json()) as {
+                    ok?: unknown;
+                    remaining?: unknown;
+                    retryAfterSeconds?: unknown;
+                };
+
+                return {
+                    allowed: data.ok === true,
+                    remaining: typeof data.remaining === 'number' ? data.remaining : undefined,
+                    retryAfterSeconds:
+                        typeof data.retryAfterSeconds === 'number'
+                            ? data.retryAfterSeconds
+                            : undefined,
+                };
+            } catch (error) {
+                log('error', 'voucher.ratelimit.check_failed', {
+                    alert: true,
+                    message: errorMessage(error),
+                });
+                // FAIL-CLOSED. Výpadek DO nesmí otevřít endpoint, který
+                // prozrazuje zůstatek platidla -- to by z každého výpadku
+                // udělalo okno pro hrubou sílu.
+                throw new ApiError(
+                    'STORAGE_UNAVAILABLE',
+                    503,
+                    'Ochrana proti nadměrným dotazům je nedostupná.',
+                );
+            }
+        },
     };
 }
 
@@ -1042,7 +1181,7 @@ function parseMinorAmount(value: unknown, field: string): number {
 }
 
 function isWellFormedVoucherCode(code: unknown): code is string {
-    return typeof code === 'string' && VOUCHER_CODE_PATTERN.test(code);
+    return isValidVoucherCodeFormat(code);
 }
 
 // ---------------------------------------------------------------------------

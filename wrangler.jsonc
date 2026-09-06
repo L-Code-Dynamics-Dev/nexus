@@ -36,6 +36,41 @@
     }
   ],
 
+  // ---------------------------------------------------------------------
+  // Durable Object -- replay protection (§6.2) + rate limit (§4).
+  // Třída `SecurityCoordinator` je v workers/api/SecurityCoordinator.ts
+  // a MUSÍ být re-exportovaná z `main` (workers/api/index.ts), jinak ji
+  // workerd při deployi nenajde.
+  //
+  // Binding se jmenuje VOUCHER_SECURITY (ne SECURITY_DO jako v PoC) --
+  // `Env.VOUCHER_SECURITY` v workers/api/types.ts a `resolveNonceStore`
+  // v routes/voucher.ts čtou přesně tenhle název.
+  //
+  // POZOR: `durable_objects` se do `env.*` NEDĚDÍ (stejně jako
+  // `d1_databases` výše) -- zopakováno v env.production.
+  // ---------------------------------------------------------------------
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "VOUCHER_SECURITY",
+        "class_name": "SecurityCoordinator"
+      }
+    ]
+  },
+
+  // `migrations` je naopak GLOBÁLNÍ (tag se v env.* neopakuje) -- je to
+  // historie schématu DO tříd, ne binding.
+  // `new_sqlite_classes` místo `new_classes`: SQLite-backed DO je dnes
+  // doporučený storage backend, umí `storage.list()` s prefixem a alarmy
+  // levněji. Migrace je JEDNOSMĚRNÁ -- z KV-backed na SQLite se nepřechází,
+  // proto se to volí hned u první verze.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SecurityCoordinator"]
+    }
+  ],
+
   "env": {
     "production": {
       "name": "nexus-api-production",
@@ -50,7 +85,23 @@
           "database_id": "<vyplnit-po-wrangler-d1-create>",
           "migrations_dir": "migrations"
         }
-      ]
+      ],
+      // ZOPAKOVÁNO ZÁMĚRNĚ -- `durable_objects` se z top-level NEDĚDÍ.
+      // Bez tohohle bloku by produkční Worker binding vůbec neměl
+      // a `/redeem` by na `resolveNonceStore` padal na 503 MISSING_BINDING
+      // (fail-closed, ale platidlo by nefungovalo).
+      //
+      // Vlastní DO namespace produkce vzniká automaticky tím, že jde
+      // o jiný Worker (`nexus-api-production`) -- stav se s dev
+      // prostředím NESDÍLÍ, stejně jako u D1.
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "VOUCHER_SECURITY",
+            "class_name": "SecurityCoordinator"
+          }
+        ]
+      }
     }
   }
 

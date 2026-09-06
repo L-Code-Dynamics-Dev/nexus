@@ -20,8 +20,19 @@
 // pinovat a hlídat (master rule).
 
 import { ApiError, jsonError, log, preflightResponse, withCors } from './http.js';
+import { handleIssue } from './routes/issuance.js';
 import { handleRedeem, handleValidate } from './routes/voucher.js';
 import type { Env } from './types.js';
+
+/**
+ * DO třída MUSÍ být exportovaná z `main` modulu (wrangler.jsonc
+ * `main: workers/api/index.ts`) -- workerd hledá `class_name` z
+ * `durable_objects.bindings` mezi exporty entry pointu. Bez tohohle řádku
+ * deploy spadne na "Durable Object class SecurityCoordinator not found".
+ * Není to import kvůli použití: `index.ts` na DO nesahá, volá ho
+ * `resolveNonceStore` v routes/voucher.ts přes binding.
+ */
+export { SecurityCoordinator } from './SecurityCoordinator.js';
 
 export default {
     async fetch(request: Request, env: Env): Promise<Response> {
@@ -97,6 +108,12 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
         case '/api/vouchers/redeem':
             requireMethod(request, 'POST');
             return handleRedeem(request, env);
+
+        // §4 Issuance -- order webhook "zákazník koupil poukaz".
+        // §15: emise NENÍ zdanitelné plnění (MPV) -- viz hlavička routes/issuance.ts.
+        case '/api/vouchers/issue':
+            requireMethod(request, 'POST');
+            return handleIssue(request, env);
 
         default:
             throw new ApiError('NOT_FOUND', 404, `Neznámý endpoint ${url.pathname}.`);

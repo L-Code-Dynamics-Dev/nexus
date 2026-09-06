@@ -36,10 +36,31 @@ export interface D1PreparedStatement {
 export interface D1Database {
     prepare(query: string): D1PreparedStatement;
     /**
-     * D1 batch je JEDNA implicitní transakce -- buď projde vše, nebo nic.
-     * To je jediná dostupná atomicita: D1 nepodporuje interaktivní
-     * BEGIN/COMMIT napříč await hranicemi. Čerpací UPDATE + INSERT
-     * transakce proto MUSÍ jít jedním `batch()`, ne dvěma `run()`.
+     * D1 batch je jedna implicitní transakce, ale POZOR NA JEJÍ HRANICI:
+     *
+     * **Rollback nastane POUZE při SQL chybě.** Statement, který proběhne
+     * bez chyby a jen nezmění žádný řádek (`meta.changes === 0`), chyba
+     * NENÍ -- batch pokračuje a ostatní statementy se zacommitují.
+     *
+     * PROKÁZÁNO na CI proti reálné D1 (`tests/workers/schema.test.ts`,
+     * skupina 8): batch s `UPDATE ... WHERE version = <konfliktní>` +
+     * `INSERT` transakce dopadl `odectenoMinor: 0, zapsanychCerpani: 1`.
+     * Oba statementy hlásily `success: true`.
+     *
+     * DŮSLEDEK PRO ČERPÁNÍ: UPDATE zůstatku a INSERT transakce NESMÍ jít
+     * jedním batchem. Při konfliktu optimistického zámku by se zapsalo
+     * čerpání BEZ odečtu -- a protože ten INSERT zabere partial unique
+     * index `(voucher_id, order_id)`, následný retry by spadl na
+     * constraintu a vyhodnotil se jako "idempotentní replay" =>
+     * `consumed: true`. Objednávka by prošla jako zaplacená kreditem,
+     * který se nikdy neodečetl.
+     *
+     * Správný vzor (viz `consumeCredit` v routes/voucher.ts):
+     *   UPDATE samostatně -> ověřit `meta.changes === 1` -> teprve INSERT
+     *   -> při unique violation na INSERTu KOMPENZOVAT odečet.
+     *
+     * `batch()` zůstává správný nástroj tam, kde na sobě statementy
+     * nezávisejí podmínkou, kterou SQL nehlásí jako chybu.
      */
     batch<T = Record<string, unknown>>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
 }
@@ -80,6 +101,33 @@ export interface NonceStore {
      * Hodí při nedostupnosti úložiště -- NIKDY nevrací `true` "pro jistotu".
      */
     reserve(nonce: string, ttlSeconds: number): Promise<boolean>;
+
+    /**
+     * Rate limit dle §4 návrhu. `true` = request smí projít, `false` =
+     * limit vyčerpán.
+     *
+     * PROČ TO PATŘÍ K NONCE STORE: obojí obsluhuje tentýž Durable Object
+     * (`SecurityCoordinator`), protože obojí potřebuje JEDEN serializační
+     * bod pro celou planetu -- rate limit rozprostřený přes isolaty by
+     * limit vynásobil jejich počtem.
+     *
+     * KDE JE TO KRITICKÉ: `/validate` prozrazuje zůstatek platidla komukoli,
+     * kdo uhodne kód. Entropie 8 znaků (~6,6×10¹¹) je obrana proti náhodě,
+     * ne proti stroji, který zkouší tisíce kódů za minutu. Bez rate limitu
+     * je §4 nesplněný.
+     *
+     * Hodí při nedostupnosti úložiště -- fail-closed, NIKDY nevrací `true`
+     * "pro jistotu" (to by z výpadku DO udělalo otevřená vrátka).
+     */
+    checkRateLimit(key: string, limit: number, windowMs: number): Promise<RateLimitVerdict>;
+}
+
+export interface RateLimitVerdict {
+    readonly allowed: boolean;
+    /** Kolik pokusů ještě zbývá v aktuálním okně (pro `X-RateLimit-Remaining`). */
+    readonly remaining?: number;
+    /** Za kolik sekund to má smysl zkusit znovu (pro `Retry-After`). */
+    readonly retryAfterSeconds?: number;
 }
 
 /** Durable Object namespace -- minimální tvar pro binding v `Env`. */
@@ -120,4 +168,14 @@ export interface Env {
     readonly ALLOWED_ORIGINS?: string;
     /** Sdílené tajemství order webhooku (Shoptet -> NEXUS). */
     readonly WEBHOOK_SECRET?: string;
+    /**
+     * Délka platnosti poukazu v MĚSÍCÍCH (§8: default 12 = 1 rok, §11:
+     * konfigurovatelné per tenant). Bez hodnoty se použije default 12.
+     *
+     * Je to `var` ve wrangler.jsonc, ne secret -- není to tajemství, je to
+     * business konfigurace. Až vznikne tenant config store (§11), přesune se
+     * tam a tenhle binding zmizí; do té doby je to jediná dostupná
+     * konfigurovatelná forma (§11 zakazuje dávat platnost natvrdo do kódu).
+     */
+    readonly VOUCHER_VALIDITY_MONTHS?: string;
 }
