@@ -103,6 +103,12 @@ export interface Campaign extends CanonicalEntity {
  * kanály... rozšiřitelný enum/kontrakt." Ponecháno jako string (ne union),
  * aby přidání nového kanálu (produktová stránka/homepage/banner) nebylo
  * breaking change typu.
+ *
+ * ROZHODNUTO (Jose 2026-09-06, Fáze 6.5 Creative resolve logika): tato
+ * entita zůstává NEVYUŽITÁ/redundantní -- vazba Creative<->placement se
+ * neřeší přes samostatný `CampaignPlacement` záznam (campaignId FK), ale
+ * přímo na `Creative.placementTypes` (viz níže). Ponecháno v kódu jen
+ * pro zpětnou kompatibilitu typu, žádný Rule/flow ho nečte.
  */
 export interface CampaignPlacement extends CanonicalEntity {
     readonly campaignId: EntityId;
@@ -128,6 +134,15 @@ export const CREATIVE_LIFECYCLE_DEFINITION: StateAxisDefinition<CreativeLifecycl
     },
 };
 
+/**
+ * ROZHODNUTO (Jose 2026-09-06, Fáze 6.5): první povolené placement hodnoty.
+ * Zůstává string (ne union) -- Jose: "nedával bych pravidlo jeden
+ * placement = jeden Creative", rozšiřitelnost o další kanály musí zůstat
+ * beze změny typu. Tyto čtyři jsou jen DOPORUČENÉ počáteční hodnoty, NE
+ * vynucený enum.
+ */
+export const INITIAL_PLACEMENT_TYPES = ['homepage', 'category', 'product', 'checkout'] as const;
+
 export interface Creative extends CanonicalEntity {
     readonly campaignId: EntityId;
     name: string;
@@ -135,22 +150,52 @@ export interface Creative extends CanonicalEntity {
     type: string;
     content: string;
     status: CreativeLifecycleState;
+    /**
+     * ROZHODNUTO (Jose 2026-09-06): Creative SÁM SEBE váže na placement(y)
+     * -- NE přes CampaignPlacement.creativeId. "Jeden Creative může mít
+     * více placementů" -- pole, ne singulár. Prázdné pole = Creative se
+     * NIKDE nevykresluje (explicitní opt-in, ne implicitní "všude").
+     */
+    placementTypes: string[];
+    /**
+     * ROZHODNUTO (Jose 2026-09-06): "v jednom placementu může existovat
+     * více Creative, jejich pořadí řeší priority" -- vlastní pole na
+     * Creative, NEZÁVISLÉ na PromoGroup.priority (jiný koncept, jiný
+     * účel -- PromoGroup priority řeší cenový konflikt, tohle řeší
+     * vykreslovací pořadí). Vyšší číslo = vyšší priorita, stejná
+     * konvence jako PromoGroup.priority.
+     */
+    priority: number;
 }
 
 /**
  * ROZHODNUTO (Jose 2026-09-05, Fáze 6.1): Campaign lifecycle
  * (DRAFT/ACTIVE/PAUSED/ENDED), Campaign 1:N PromoGroup, PromoGroup
  * povinná priority, Creative jednoduchý kontrakt s vlastním lifecycle,
- * Placement rozšiřitelný string. Zbývající OPEN QUESTIONS (business rule
- * detail, EXPLICITNĚ MIMO SCOPE Fáze 6.1):
+ * Placement rozšiřitelný string.
  *
- * 1. PromoGroup priority tie-break algoritmus (co přesně se stane při
- *    shodné prioritě, jak se priorita aplikuje na výslednou cenu/promo) --
- *    business logika, ne struktura kostry.
- * 2. CampaignPlacement konkrétní hodnoty (závisí na Connector Layer
- *    schopnostech) -- nerozhodnuto.
- * 3. Creative `type`/`content` konkrétní hodnoty a validace -- nerozhodnuto.
- * 4. Kdo campaign vytváří/schvaluje (workflow) a napojení na Decision/
- *    Execution vrstvu -- EXPLICITNĚ MIMO SCOPE (žádné schvalovací workflow
- *    bez dalšího zadání, analogicky k B2B approval workflow zákazu).
+ * ROZHODNUTO (Jose 2026-09-06, Fáze 6.5 Creative resolve): Creative je
+ * OBSAHOVÁ vrstva, NIKDY cenová (nikdy nemění cenu -- ta zůstává výhradně
+ * v Pricing/PromoGroup/QuantityTier/X+X vrstvě). Scope: Creative se smí
+ * vykreslit jen pro produkt, který patří do PromoGroup jeho Campaign
+ * (Campaign -> PromoGroup -> Products -> Creative vazba). Placement:
+ * `homepage`/`category`/`product`/`checkout` jako první doporučené
+ * hodnoty (viz `INITIAL_PLACEMENT_TYPES`), NE vynucený enum. Creative
+ * nese `placementTypes: string[]` (1:N, ne 1:1) a vlastní `priority`
+ * (nezávislé na PromoGroup.priority). `CampaignPlacement` entita zůstává
+ * nevyužitá -- viz komentář u jejího typu. Resolve logika (ne nový
+ * lifecycle) implementována v `domains/campaign/CreativeResolutionRule.ts`.
+ *
+ * Zbývající OPEN QUESTIONS (business rule detail, EXPLICITNĚ MIMO SCOPE):
+ *
+ * 1. PromoGroup priority tie-break algoritmus -- ROZHODNUTO Fází 6.3
+ *    (createdAt -> id), viz PromoGroupPriorityRule.ts.
+ * 2. Creative `type`/`content` konkrétní hodnoty a validace -- nerozhodnuto.
+ * 3. Kdo campaign/creative vytváří/schvaluje (workflow) a napojení na
+ *    Decision/Execution vrstvu -- EXPLICITNĚ MIMO SCOPE (žádné schvalovací
+ *    workflow bez dalšího zadání, analogicky k B2B approval workflow zákazu).
+ * 4. Creative priority tie-break při shodné hodnotě (dva Creative se
+ *    stejnou priority ve stejném placementu) -- Jose nezadal konkrétní
+ *    tie-break pro Creative (na rozdíl od PromoGroup createdAt/id) --
+ *    NEIMPLEMENTOVÁNO, viz CreativeResolutionRule.ts komentář.
  */

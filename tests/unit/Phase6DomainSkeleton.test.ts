@@ -103,6 +103,8 @@ describe('Fáze 6.1 — Campaign/PromoGroup/Creative vztahy + lifecycle', () => 
             type: 'image',
             content: 'https://cdn.example.com/banner.jpg',
             status: 'DRAFT',
+            placementTypes: ['homepage'],
+            priority: 0,
         };
 
         expect(creative.campaignId).toBe(campaignId);

@@ -141,7 +141,17 @@ Testy: 14 nových (`PromoGroupDiscountRule.test.ts` 9 + `CampaignFlows.test.ts` 
 
 Testovací matice záměrně používá existující `policy-v1.json`/ZR tier konfiguraci (jediná funkční Pricing chain konfigurace v repu) — jde o ověření produkčního kódu, ne o vlastní klientská data.
 
-**Zbývající Domain Rules (Fáze 6.5 pokračování, JEDNA doména najednou, podle Josova pořadí):** Creative (skutečné použití obsahu/placement) → B2B (obchodní pravidla firemních zákazníků) → Invoice/Omega (skutečný dokladový workflow) → Warehouse (skutečná skladová logika) → Billing/Subscription (skutečný SaaS billing). Každá čeká na explicitní business zadání od Jose před implementací — žádné domýšlení.
+**Domain Rules (Fáze 6.5 pokračování) — Creative HOTOVO** (2026-09-06, Josovo zadání: "Creative není další cenová vrstva. Je to obsahová vrstva kampaně, která říká co se má zákazníkovi zobrazit a v jakém kontextu."):
+
+- `core/canonical/entities/Campaign.ts` — `Creative` rozšířena o `placementTypes: string[]` (1:N, ne 1:1 — Jose: "jeden Creative může mít více placementů") a vlastní `priority: number` (nezávislé na PromoGroup.priority — řeší vykreslovací pořadí, ne cenový konflikt). `INITIAL_PLACEMENT_TYPES` = `homepage`/`category`/`product`/`checkout` jako doporučené hodnoty, string zůstává rozšiřitelný (ne enum). **`CampaignPlacement` entita zůstává explicitně nevyužitá** — vazba Creative↔placement jde přes `Creative.placementTypes`, ne přes `CampaignPlacement.campaignId`.
+- `domains/campaign/CreativeResolutionRule.ts` (nový) — resolve řetězec (NE nový lifecycle): Campaign ACTIVE? → Creative PUBLISHED? → placement odpovídá? → produkt patří do PromoGroup Campaign? → shouldRender. Creative NIKDY nepočítá/nemění cenu — žádné volání Pricing/PromoGroup/QuantityTier Rules.
+- `domains/campaign/CampaignFlows.ts` — nová `resolveCreativesForPlacement()` skládá `CreativeResolutionRule` přes více kandidátních Creative a vrací jen eligible, seřazené podle `priority` (vyšší první, stabilní řazení).
+- Testy: 34 nových (`CreativeResolutionRule.test.ts` 9, `CampaignFlows.test.ts` +4, existující testy opraveny na nový povinný shape).
+- `npm run build` čistý, `npm test` 644/644 (635 hlavní běh + 9 omega-executor izolovaně).
+
+**UNRESOLVED** (Jose nezadal, NEIMPLEMENTOVÁNO): tie-break při shodné `priority` dvou+ Creative ve stejném placementu (řazení je jen stabilní/deterministické, ne odsouhlasený algoritmus jako u PromoGroup createdAt/id); přesný vztah "odpovídá kategorie" v resolve řetězci (Product má `categoryId`, ale PromoGroup nemá vazbu na kategorii vůbec, jen na `productIds` — Rule řeší jen produkt-přes-PromoGroup scope).
+
+**Zbývající Domain Rules (Fáze 6.5 pokračování, JEDNA doména najednou, podle Josova pořadí):** B2B (obchodní pravidla firemních zákazníků) → Invoice/Omega (skutečný dokladový workflow) → Warehouse (skutečná skladová logika) → Billing/Subscription (skutečný SaaS billing). Každá čeká na explicitní business zadání od Jose před implementací — žádné domýšlení.
 
 ## Co explicitně NEPŘENÁŠET
 

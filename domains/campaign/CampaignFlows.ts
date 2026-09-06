@@ -25,6 +25,7 @@ import { shouldEvaluateCampaign } from './CampaignLifecycleRule.js';
 import { resolveConflict, type PromoGroupConflictResult } from './PromoGroupPriorityRule.js';
 import { CreativeLifecycleRule, type CreativeLifecycleRuleResult } from './CreativeLifecycleRule.js';
 import { PromoGroupDiscountRule, type PromoGroupDiscountRuleResult } from './PromoGroupDiscountRule.js';
+import { CreativeResolutionRule } from './CreativeResolutionRule.js';
 import type { RuleContext } from '../../core/canonical/rules/Rule.js';
 
 /**
@@ -159,4 +160,42 @@ export function publishCreative(
     });
 
     return { ...result, creativeId: creative.id };
+}
+
+/**
+ * Flow 6 (Fáze 6.5) -- Creative resolve pro daný placement/produkt. Jose
+ * diagram: "Campaign ACTIVE? -> Creative PUBLISHED? -> odpovídá placement?
+ * -> odpovídá produkt/PromoGroup? -> priority -> VYKRESLIT". Skládá
+ * `CreativeResolutionRule` (per-Creative ano/ne rozhodnutí) přes VŠECHNY
+ * kandidátní Creative dané Campaign a vrátí jen ty, co smí vykreslit,
+ * SEŘAZENÉ podle `priority` (Jose: "v jednom placementu může existovat
+ * více Creative, jejich pořadí řeší priority").
+ *
+ * Řazení je STABILNÍ (Array.sort() garance), ne odsouhlasený tie-break
+ * algoritmus pro shodnou priority -- viz UNRESOLVED komentář v
+ * CreativeResolutionRule.ts.
+ */
+export interface ResolvedCreative {
+    readonly creative: Creative;
+}
+
+export function resolveCreativesForPlacement(
+    campaign: Pick<Campaign, 'id' | 'status' | 'promoGroupIds'>,
+    candidateCreatives: readonly Creative[],
+    allPromoGroups: readonly PromoGroup[],
+    placement: string,
+    productId: string,
+    context: RuleContext
+): readonly ResolvedCreative[] {
+    const rule = new CreativeResolutionRule(context);
+
+    const eligible = candidateCreatives.filter((creative) => {
+        const result = rule.evaluate({ campaign, creative, allPromoGroups, placement, productId });
+        return result.shouldRender;
+    });
+
+    // Vyšší priority první -- stabilní řazení (Array.prototype.sort je
+    // stabilní od ES2019), shodná priority zachová relativní pořadí
+    // vstupního pole (deterministické, ale NENÍ odsouhlasený tie-break).
+    return [...eligible].sort((a, b) => b.priority - a.priority).map((creative) => ({ creative }));
 }

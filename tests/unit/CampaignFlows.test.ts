@@ -11,6 +11,7 @@ import {
     evaluateCampaignForProduct,
     evaluateCampaignPromoPricingForProduct,
     publishCreative,
+    resolveCreativesForPlacement,
 } from '../../domains/campaign/CampaignFlows.js';
 import type { Campaign, PromoGroup, Creative } from '../../core/canonical/entities/Campaign.js';
 
@@ -55,6 +56,8 @@ function makeCreative(overrides: Partial<Creative> = {}): Creative {
         type: 'image',
         content: 'https://cdn.example.com/banner.jpg',
         status: 'DRAFT',
+        placementTypes: ['homepage'],
+        priority: 0,
         ...overrides,
     };
 }
@@ -245,5 +248,52 @@ describe('Flow 4 — publishCreative (Creative publication)', () => {
         const result = publishCreative(creative, ctx);
 
         expect(result.allowed).toBe(false);
+    });
+});
+
+describe('Flow 6 (Fáze 6.5) — resolveCreativesForPlacement (Creative resolve pro placement/produkt)', () => {
+    it('vrátí jen eligible Creative, seřazené podle priority (vyšší první)', () => {
+        const campaign = makeCampaign({ status: 'ACTIVE', promoGroupIds: ['promo_a'] });
+        const groupA = makePromoGroup({ id: 'promo_a', productIds: ['prod_1'] });
+
+        const lowPriority = makeCreative({ id: 'creative_low', status: 'PUBLISHED', placementTypes: ['product'], priority: 1 });
+        const highPriority = makeCreative({ id: 'creative_high', status: 'PUBLISHED', placementTypes: ['product'], priority: 10 });
+
+        const result = resolveCreativesForPlacement(campaign, [lowPriority, highPriority], [groupA], 'product', 'prod_1', ctx);
+
+        expect(result.map((r) => r.creative.id)).toEqual(['creative_high', 'creative_low']);
+    });
+
+    it('vyfiltruje DRAFT/ARCHIVED Creative a Creative s neshodujícím se placementem', () => {
+        const campaign = makeCampaign({ status: 'ACTIVE', promoGroupIds: ['promo_a'] });
+        const groupA = makePromoGroup({ id: 'promo_a', productIds: ['prod_1'] });
+
+        const draft = makeCreative({ id: 'creative_draft', status: 'DRAFT', placementTypes: ['product'] });
+        const wrongPlacement = makeCreative({ id: 'creative_wrong', status: 'PUBLISHED', placementTypes: ['homepage'] });
+        const eligible = makeCreative({ id: 'creative_ok', status: 'PUBLISHED', placementTypes: ['product'] });
+
+        const result = resolveCreativesForPlacement(campaign, [draft, wrongPlacement, eligible], [groupA], 'product', 'prod_1', ctx);
+
+        expect(result.map((r) => r.creative.id)).toEqual(['creative_ok']);
+    });
+
+    it('PAUSED kampaň -> žádný Creative se nevykreslí, i kdyby byly jinak eligible', () => {
+        const campaign = makeCampaign({ status: 'PAUSED', promoGroupIds: ['promo_a'] });
+        const groupA = makePromoGroup({ id: 'promo_a', productIds: ['prod_1'] });
+        const creative = makeCreative({ status: 'PUBLISHED', placementTypes: ['product'] });
+
+        const result = resolveCreativesForPlacement(campaign, [creative], [groupA], 'product', 'prod_1', ctx);
+
+        expect(result).toEqual([]);
+    });
+
+    it('produkt mimo PromoGroup scope -> žádný Creative se nevykreslí', () => {
+        const campaign = makeCampaign({ status: 'ACTIVE', promoGroupIds: ['promo_a'] });
+        const groupA = makePromoGroup({ id: 'promo_a', productIds: ['prod_other'] });
+        const creative = makeCreative({ status: 'PUBLISHED', placementTypes: ['product'] });
+
+        const result = resolveCreativesForPlacement(campaign, [creative], [groupA], 'product', 'prod_1', ctx);
+
+        expect(result).toEqual([]);
     });
 });
