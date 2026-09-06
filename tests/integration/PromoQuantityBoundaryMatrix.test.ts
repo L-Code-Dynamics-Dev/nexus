@@ -1,15 +1,21 @@
 // Hraniční testovací matice -- Fáze 6.5 pokračování (Josovo zadání
 // 2026-09-06): "Nejprve doplnit testovací matici přesně na hraniční
 // kombinace" před pokračováním na Creative doménu. Ověřuje END-TO-END
-// kompozici celého kandidátního cenového modelu:
+// kompozici celého kandidátního cenového modelu (diagram aktualizován
+// 2026-09-06):
 //
-//   BASE PRICE -> SALE/LOYALTY/CUSTOMER -> DISCOUNT LIMITS -> CURRENT PRICE
-//   -> PROMOGROUP CANDIDATE -> QUANTITY TIER CANDIDATE -> BEST PRICE -> ROUNDING
+//   BASE PRICE -> SALE/AKČNÍ CENA -> LOYALTY/ZÁKAZNICKÁ SLEVA ->
+//   DISCOUNT LIMITS -> CURRENT PRICE -> PROMOGROUP -> QUANTITY TIER ->
+//   X+X/PROMO KONTEXT -> BEST CANDIDATE -> ROUNDING
 //
-// Používá createNexusPricingCalculator (Fáze 1, produkční Pricing chain)
-// pro BASE->CURRENT_PRICE krok, pak PromoGroupDiscountRule + QuantityTierRule
-// jako kandidáty, BestCandidatePriceRule pro finální výběr. XPlusXRule je
-// NEZÁVISLÁ vrstva (paid/free split, ne cena) testovaná vedle.
+// Používá createNexusPricingCalculator (Fáze 1, produkční Pricing chain,
+// SALE i LOYALTY jsou uvnitř jako HighestDiscountRule krok) pro
+// BASE->CURRENT_PRICE, pak PromoGroupDiscountRule + QuantityTierRule jako
+// kandidáty, BestCandidatePriceRule pro finální výběr. XPlusXRule NENÍ
+// třetí cenový kandidát (ROZHODNUTO Jose 2026-09-06) -- je to datová
+// závislost: jeho totalReceivedQty (celkový počet VČETNĚ zdarma kusů)
+// je vstup do QuantityTierRule.totalQuantity, proto v diagramu stojí
+// PŘED QuantityTier krokem, ne jako paralelní kandidát v BestCandidatePriceRule.
 //
 // 10 scénářů z Josova zadání (doslovná citace u každého describe bloku).
 

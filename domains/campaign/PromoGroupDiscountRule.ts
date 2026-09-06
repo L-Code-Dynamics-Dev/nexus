@@ -3,10 +3,13 @@
 // Domain Rules... Campaign + PromoGroup, protože tam už máme nejpevnější
 // základ"). Implementuje PŘESNÉ architektonické rozhodnutí Jose:
 //
-// POŘADÍ V CENOVÉM MODELU (kandidátní, NE řetězení procent):
-//   basePrice -> sale/loyalty/customer pricing -> discount limits ->
-//   currentPrice -> [PromoGroup kandidát] -> [QuantityTier kandidát] ->
-//   finální výběr nejlepší platné ceny -> rounding
+// POŘADÍ V CENOVÉM MODELU (kandidátní, NE řetězení procent; aktualizováno
+// dle Jose diagramu 2026-09-06):
+//   basePrice -> sale/akční cena -> loyalty/zákaznická sleva -> discount
+//   limits -> currentPrice -> [PromoGroup kandidát] -> [QuantityTier
+//   kandidát] -> X+X/promo kontext (datová závislost pro QuantityTier
+//   totalQuantity, NE třetí cenový kandidát, viz BestCandidatePriceRule.ts)
+//   -> finální výběr nejlepší platné ceny -> rounding
 //
 // KLÍČOVÉ ARCHITEKTONICKÉ PRAVIDLO (Jose, doslovně): "PromoGroup se
 // aplikuje na currentPrice, tedy na cenu vzniklou po Pricing chainu. Ne na

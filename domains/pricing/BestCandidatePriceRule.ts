@@ -1,12 +1,25 @@
 // BestCandidatePriceRule -- Fáze 6.5 pokračování. Finální krok kandidátního
-// cenového modelu (Jose 2026-09-05, doslovně):
+// cenového modelu (Jose 2026-09-06, aktualizovaný diagram):
 //
-//   BASE PRICE -> SALE/LOYALTY/CUSTOMER -> DISCOUNT LIMITS -> CURRENT PRICE
-//   -> PROMOGROUP CANDIDATE -> QUANTITY TIER CANDIDATE -> BEST PRICE -> ROUNDING
+//   BASE PRICE -> SALE/AKČNÍ CENA -> LOYALTY/ZÁKAZNICKÁ SLEVA ->
+//   DISCOUNT LIMITS -> CURRENT PRICE -> PROMOGROUP -> QUANTITY TIER ->
+//   X+X/PROMO KONTEXT -> BEST CANDIDATE -> ROUNDING
 //
 // "PromoGroup, QuantityTier a další mechanismy jsou kandidáti, ne
 // automatické sčítání slev. Výsledkem je vždy nejnižší platná cena,
 // nikoliv kombinace všech procent."
+//
+// ROZHODNUTO (Jose 2026-09-06): "X+X / promo kontext" v diagramu NENÍ
+// třetí cenový kandidát vedle PromoGroup/QuantityTier -- X+X (paid/free
+// split, viz domains/pricing/XPlusXRule.ts) NEPOČÍTÁ žádnou cenu vůbec.
+// Jeho místo v diagramu vyjadřuje DATOVOU ZÁVISLOST: X+X musí být
+// vyhodnoceno PŘED QuantityTier, protože `totalReceivedQty` z X+X (celkový
+// počet kusů VČETNĚ zdarma) je vstup do `QuantityTierRule.totalQuantity`
+// (design proposal §1 -- množstevní pásmo se počítá z celkového počtu, ne
+// jen placených kusů). BestCandidatePriceRule proto přijímá STÁLE jen dva
+// možné kandidáty (`promoGroupCandidate`, `quantityTierCandidate`) plus
+// `currentPrice` -- žádný samostatný X+X vstup zde, viz test "6. X+X +
+// QuantityTier" v tests/integration/PromoQuantityBoundaryMatrix.test.ts.
 //
 // Tato Rule NEPOČÍTÁ PromoGroup ani QuantityTier kandidáty samotné (to
 // dělají PromoGroupDiscountRule a QuantityTierRule) -- přijímá jejich
