@@ -1,6 +1,7 @@
 # Design Proposal: Digital Voucher / Kreditní poukaz
 
-Status: **NÁVRH UZAVŘEN — připraveno k implementaci Fáze A.**
+Status: **NÁVRH UZAVŘEN — všechna blokující rozhodnutí padla, připraveno
+k implementaci Fáze A.**
 Zdroj zadání: Jose (produkční architekt), rozhodnutí Lucky 2026-09-06.
 
 Účel dokumentu: zafixovat DESIGN domény "digitální kreditní poukaz" dřív, než
@@ -9,8 +10,9 @@ vznikne jediný řádek implementace.
 Historie dokumentu:
 - 2026-09-06 (v1): zápis Josova zadání, tři body ponechány otevřené.
 - 2026-09-06 (v2): Lucky uzavřel **(a) atomicita** a **(b) cesta do košíku**,
-  doplnil no-API architekturu (frontend injection + Cloudflare Edge). Bod
-  **(c) daňový režim** zůstává otevřený, ale **neblokuje Fáze A/B**.
+  doplnil no-API architekturu (frontend injection + Cloudflare Edge).
+- 2026-09-06 (v3): Lucky uzavřel **(c) daňový režim** — víceúčelový poukaz
+  (MPV) dle § 15b ZDPH, viz §15. **Žádný bod nezůstává otevřený.**
 
 Umístění v repu: **`domains/voucher/`** (rozhodnutí Lucky) — vlastní doména
 vedle `pricing`/`billing`, ne podčást billingu. Entity `Voucher` a
@@ -444,7 +446,7 @@ je otestovaný a stabilní). Nová doména ho nenahrazuje ani nevolá.
 |---|---|
 | Customer | Customer → CreditVoucher |
 | Order | Order → issuance + redemption |
-| Invoice | vazba na Order (viz bod (c)) |
+| Invoice | vazba přes Order — účetní systém per tenant (Omega / Pohoda / Money S3), viz §15.1 |
 | Tenant | konfigurace voucheru |
 | Audit | **všechny** změny kreditu |
 
@@ -464,8 +466,9 @@ webhook, audit, testy souběhu.
 Validační endpoint, HMAC token, JS injection do Shoptet šablony, cart masking,
 zobrazení zůstatku, mobilní UX, redemption webhook s přepočtem a HOLD.
 
-### Fáze C — Dokumenty
-PDF, QR, email (Resend), šablony.
+### Fáze C — Dokumenty ← **ODBLOKOVÁNO rozhodnutím (c)**
+PDF, QR, email (Resend), šablony. PDF je **doklad o kreditu, ne daňový
+doklad** — bez rozpadu DPH, s formulací dle VOP (viz §15).
 
 ### Fáze D — Admin
 Seznam, detail, historie, storno, refundace, vyhledávání.
@@ -482,30 +485,130 @@ poukazy, hromadné vystavení, veřejné API.
 |---|---|---|---|
 | (a) Atomické čerpání v D1 | **UZAVŘENO** — optimistický zámek | Lucky, 2026-09-06 | — |
 | (b) Cesta kreditu do košíku | **UZAVŘENO** — JS injection + HMAC + HOLD; API větev per tenant | Lucky, 2026-09-06 | — |
-| (c) Účetní / daňový režim | **OTEVŘENO** | čeká na Jose / účetní | Fáze C (doklady), napojení na Omegu |
+| (c) Účetní / daňový režim | **UZAVŘENO** — víceúčelový poukaz (MPV), § 15b ZDPH | Lucky, 2026-09-06 | — |
 
-### (c) Účetní / daňový režim — proč to nespěchá, ale nesmí se zapomenout
+**Všechny tři body uzavřeny. Návrh je kompletní.**
 
-Poukaz je v ČR **poukaz na budoucí plnění** s vlastním DPH režimem:
+---
 
-- **jednoúčelový** — sazba známa předem → DPH už při **prodeji** poukazu
-- **víceúčelový** — kredit napříč sortimentem s různými sazbami → DPH až
-  při **uplatnění**
+## 15. Daňový režim — ROZHODNUTO (c): víceúčelový poukaz (MPV)
 
-Kreditní poukaz čerpatelný na cokoli v e-shopu **vypadá** na víceúčelový, ale
-**to není rozhodnutí, které smí udělat vývojář ani AI** — určuje, kdy vzniká
-daňová povinnost a co jde do Omegy (`connectors/omega/`, `domains/omega/`) a
-jak vypadá vazba `Voucher → Invoice`. Špatná volba = špatně vystavené doklady.
+**Rozhodnutí: kreditní poukaz je víceúčelový poukaz podle § 15b zákona
+o DPH.** Kredit je čerpatelný napříč sortimentem s různými sazbami (12 % /
+21 %), takže v okamžiku prodeje **není známo**, jaké plnění bude poskytnuto —
+což je přesně definiční znak MPV.
 
-**Fáze A a B na tom nezávisí** — obě pracují se stavem kreditu, ne s doklady.
-Rozhodnutí je potřeba **před Fází C**.
+### Co z toho plyne pro doklady
+
+| Okamžik | Co se děje | DPH |
+|---|---|---|
+| **Prodej poukazu** | doklad o přijaté platbě / finančním kreditu | **bez DPH** — nulová sazba / osvobozeno / neplnění; není zdanitelné plnění |
+| **Čerpání kreditu** | řádný daňový doklad za objednávku | **běžné sazby podle skutečně nakoupeného zboží** |
+
+Poukaz se v košíku chová jako **forma úhrady / zápočet**, ne jako sleva —
+což je konzistentní s §12 (voucher je platební vrstva za Pricing Engine,
+nikdy sleva v něm). Základ daně se počítá ze skutečného zboží, poukaz se
+odečítá až v rozpadu plateb.
+
+### Kde to lze ověřit (Lucky, 2026-09-06)
+
+1. **Detail produktu poukazu** — Administrace → Produkty → detail → Ceník →
+   *Sazba DPH* = **0 %** (příp. neplátce / osvobozeno).
+2. **Vystavená faktura z čerpání** — Administrace → Objednávky → objednávka
+   s uplatněným poukazem → Vystavená faktura. Zboží má standardní sazbu,
+   poukaz je odečten na vlastním řádku / v rozpadu plateb. **Toto je
+   rozhodující důkaz:** běžná DPH ze zboží ⇒ víceúčelový poukaz.
+3. **Obchodní podmínky** — sekce Platební podmínky / Dárkové poukazy;
+   formulace typu „poukaz slouží jako záloha na nákup zboží, při jeho nákupu
+   se nevystavuje daňový doklad s DPH“.
+
+### KRITICKÉ — co z toho NEXUS smí a nesmí dělat
+
+`core/canonical/entities/Invoice.ts` obsahuje závazné rozhodnutí Jose
+(2026-09-05, Fáze 6.1):
+
+> *„NEXUS nevytváří účetní pravdu — Omega zůstává účetním zdrojem pravdy.
+> Invoice je obchodní reprezentace / vazba na účetní doklad přes
+> `omegaDocumentId` (odkaz, NE kopie jeho dat).“*
+> *„Automatické vytváření/vystavování Invoice je EXPLICITNĚ MIMO SCOPE.“*
+
+Proto **MPV režim je pro Voucher doménu kontrakt, ne výpočet:**
+
+- NEXUS **nepočítá DPH** z voucheru a **nevystavuje** daňové doklady.
+- NEXUS **eviduje kredit a jeho pohyby** a předává je jako fakta —
+  účetní systém z nich dělá účetní pravdu.
+- Vazba `Voucher → Invoice` je **přes Order**, ne přímá: `Invoice.orderId`
+  je 1:1 na Order, a `voucher_transactions.order_id` říká, ve které
+  objednávce byl kredit čerpán. **Nová vazba se nezavádí.**
+- Emise poukazu (`ISSUED`) **není zdanitelné plnění**, takže z ní
+  nevzniká daňový doklad — jen doklad o přijaté platbě.
+
+**Dopad na Fázi C:** PDF poukazu je **doklad o kreditu, ne daňový doklad**.
+Nesmí obsahovat rozpad DPH ani se tvářit jako faktura. Musí nést větu
+odpovídající VOP (poukaz jako záloha na budoucí nákup).
+
+### 15.1 Účetní systém není jen Omega (ROZHODNUTO — Lucky, 2026-09-06)
+
+> Lucky: *„nedeláme jen omegu ale taky pohodu a Money S3“*
+
+Předchozí verze tohoto návrhu psala „Omega“ tam, kde patří **„účetní
+systém“**. To je věcná chyba — L-Code nasazuje minimálně **Omega, Pohoda
+(mServer / `.bat` agent) a Money S3**.
+
+**Stav v repu (ověřeno 2026-09-06):**
+
+| Systém | Stav | Kde |
+|---|---|---|
+| Omega | migrovaná legacy vrstva | `connectors/omega/legacy/`, `domains/omega/` |
+| Pohoda | **už reálně figuruje** | `OmegaExecutor.ts` spouští `.bat`; threat model řeší *„zamčený Pohoda soubor“* a *„Pohoda dialog čeká na input“* |
+| Money S3 | **není v repu vůbec** | — |
+| generická ERP vrstva | **adresář existuje, je prázdný** | `connectors/erp-generic/` |
+
+`docs/entity-audit/Invoice.md` už dvojici „Omega/Pohoda“ zmiňuje na dvou
+místech — návrh voucheru to jen nepřevzal.
+
+**To není dodatečná oprava — je to původní záměr architektury.** Repo má
+`connectors/Connector.ts` jako obecné rozhraní a `connectors/erp-generic/`
+jako **připravené místo pro ERP vrstvu**; adresář existuje prázdný, protože
+se k němu zatím nedošlo, ne protože by se s víc systémy nepočítalo. Omega je
+dnes jediný naplněný konektor, ne jediný plánovaný.
+
+**Rozhodnutí pro Voucher doménu:**
+
+1. Voucher doména **nesmí znát konkrétní účetní systém**. Mluví s ním přes
+   rozhraní (`connectors/Connector.ts` / `erp-generic`), ne přes
+   `connectors/omega/`. Přidání čtvrtého ERP nesmí znamenat zásah do
+   `domains/voucher/`.
+2. Pole `Invoice.omegaDocumentId` je **špatně pojmenované pro tři systémy**.
+   Voucher doména ho **nerozšiřuje ani nepřejmenovává** (Non-Interference —
+   `Invoice.ts` je Josovo Fáze 6.1 rozhodnutí). Návrh k projednání:
+   `accountingDocumentId` + `accountingSystem: 'OMEGA'|'POHODA'|'MONEY_S3'`.
+   **Patří to do Invoice/ERP domény, ne do voucheru** — zapsáno jako dluh.
+3. Volba účetního systému je **per tenant** (§11), stejně jako volba cesty
+   kreditu do košíku (§6.3). Tenant běží na jednom z nich, ne na všech.
+4. **MPV režim je nezávislý na systému** — § 15b ZDPH platí bez ohledu na to,
+   jestli doklad vystaví Omega, Pohoda nebo Money S3. Rozhodnutí (c) tedy
+   touto opravou nepadá, jen se rozšiřuje jeho dosah.
+
+> **Důsledek pro plán:** naplnění `connectors/erp-generic/` je **předpoklad**
+> pro účetní napojení voucheru napříč tenanty, a dnes neexistuje. Voucher
+> doména si ho **nebude psát sama** — Fáze A–D na účetním napojení nezávisí
+> (pracují s kreditem, ne s doklady). Napojení je samostatný úkol mimo tento
+> návrh.
+
+> **Zbývá potvrdit s účetní při napojení (nebrání Fázím A–D):** jakým
+> konkrétním typem dokladu se prodej poukazu zapisuje v každém ze tří
+> systémů. To je otázka **mapování**, ne daňového režimu — ten je rozhodnut
+> jako MPV.
 
 ---
 
 ## Poznámky ke stavu repa
 
-1. `connectors/omega/` obsahuje jen `legacy/` — napojení voucher dokladů na
-   Omegu (bod c) nemá dnes kam sáhnout přes migrovanou vrstvu.
+1. `connectors/omega/` obsahuje jen `legacy/` a `connectors/erp-generic/` je
+   **prázdná** — napojení voucher dokladů na účetnictví (§15.1) nemá dnes kam
+   sáhnout. Pohoda je zatím jen implicitně přes `OmegaExecutor.ts` (`.bat`
+   agent), Money S3 v repu není vůbec. **Nebrání Fázím A–D.**
 2. `domains/billing/` je téměř prázdná (Fáze 6 nedokončená). Voucher je jí
    tematicky blízko, ale **rozhodnuto: samostatná `domains/voucher/`** —
    vlastní životní cyklus, vlastní D1 tabulky, vlastní webhooky.
@@ -514,5 +617,8 @@ Rozhodnutí je potřeba **před Fází C**.
 
 ---
 
-Status: **NÁVRH UZAVŘEN pro Fáze A a B.** Bod (c) otevřený, blokuje až Fázi C.
-Zapsáno 2026-09-06.
+Status: **NÁVRH UZAVŘEN.** Všechna tři blokující rozhodnutí (a)(b)(c) padla,
+Fáze A–D jsou odblokované. Zbývající dluhy (`connectors/erp-generic/`,
+přejmenování `omegaDocumentId`, umístění admin UI) jsou **mimo tento návrh**
+a žádnou fázi neblokují.
+Zapsáno 2026-09-06 (v3).
