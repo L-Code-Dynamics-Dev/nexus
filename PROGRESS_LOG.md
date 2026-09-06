@@ -1,0 +1,139 @@
+# NEXUS — Progress Log
+
+## 2026-09-06 — Digital Voucher: návrh uzavřen, Fáze A rozpracovaná
+
+### Stav: větev `chore/vitest-4-upgrade`, NEMERGOVÁNO do main
+
+Commity dnes (nejnovější první):
+```
+d6eecc8 feat(voucher): CreditVoucher entita + ValidityRule (Fáze A, ČÁSTEČNÉ)
+acd3bb2 chore: vitest 2.1.1 -> 4.1.0, Cloudflare test plugin, pinované verze
+78201c5 docs: dva nové design proposals -- ERP generic vrstva a Shoptet prémiová šablona
+01cbc48 fix(tests): omega-executor-sanity timeout 20s (flaky na pomalém stroji)
+e43030a docs: Digital Voucher v3 -- uzavřen bod (c) daňový režim + oprava ERP vrstvy
+f92083c docs: Digital Voucher v2 -- uzavřena rozhodnutí (a) atomicita a (b) cesta do košíku
+```
+
+Ověřeno: `npx vitest run` → **644/644**, `npx tsc --noEmit` → čistý.
+
+---
+
+### 1. Digital Voucher — návrh UZAVŘEN (v3)
+
+`docs/design-proposals/Digital-Voucher.md`. Všechna tři blokující rozhodnutí padla:
+
+| Bod | Rozhodnutí | Kdo |
+|---|---|---|
+| (a) Atomicita | **optimistický zámek**, `version` sloupec, DB je autorita. Ne Durable Object. | Lucky |
+| (b) Cesta do košíku | **kredit produkt `1 Kč × N ks` + kupón 100 % omezený na kategorii** | Lucky |
+| (c) Daňový režim | **víceúčelový poukaz (MPV)** dle § 15b ZDPH | Lucky |
+
+**Mechanismus (b) — jak to funguje, OVĚŘENO NAOSTRO (Lucky):**
+1. Zákazník zadá svůj kód z PDF do pole kupónu v košíku
+2. Náš JS request odchytí (`preventDefault` + `stopImmediatePropagation` v **capture** fázi)
+3. Worker ověří kód proti D1, spočítá `min(zůstatek, košík)`
+4. Vloží skrytý kredit produkt `1 Kč × N ks` přes `/action/Cart/addCartItem/`
+5. Aplikuje kupón se 100 % slevou **omezenou na kategorii** kredit produktu
+6. Shoptet započítá serverově → zobrazená cena = účtovaná cena
+
+**Proč to drží:**
+- Zákazníkův kód se do Shoptetu vůbec nedostane
+- Kupón nemá cenu ke krádeži — 100 % jen na kredit položku v té kategorii
+- Košík dražší než voucher: kupón zabere jen na kredit položku, zbytek zákazník doplatí
+- **D1 je jediný zdroj pravdy o zůstatku** — bez platného voucheru se nic neodečte
+
+**Rozdělení autorit:**
+
+| Vrstva | Kdo hlídá |
+|---|---|
+| kolik smí čerpat | D1 (zůstatek, platnost, atomický odečet) |
+| na co smí kupón zabrat | Shoptet (omezení na kategorii) |
+| kolik se reálně odečte | Worker na order webhooku |
+| zobrazená = účtovaná cena | Shoptet (počítá serverově) |
+
+**Otevřený požadavek (Lucky):** naše UI musí instalaci **validovat a průběžně kontrolovat** —
+kredit produkt existuje a stojí 1 Kč, kategorie sedí, kupón je omezený právě na ni, JS nasazený.
+Bez toho nejde systém zapnout; při změně odmítnout čerpání a hlásit. Zatím není v návrhu zapsáno.
+
+---
+
+### 2. Fáze A — ROZPRACOVANÁ, 6 agentů spadlo na session limit
+
+**Hotovo a commitnuto (`d6eecc8`):**
+- `core/canonical/entities/CreditVoucher.ts` (313 ř.)
+- `domains/voucher/CreditVoucherValidityRule.ts`
+
+**CHYBÍ — přesně tohle dopsat:**
+
+| Soubor | Obsah |
+|---|---|
+| `migrations/0001_credit_voucher.sql` | §3 návrhu; peníze **INTEGER v haléřích** (`*_minor`), ne REAL; `version`; `UNIQUE(voucher_id, order_id) WHERE type='REDEEMED'`; CHECK `current_balance >= 0` |
+| `wrangler.jsonc` | D1 binding `DB`, dev + `env.production` (bindingy se do env **nedědí**), `migrations_dir` |
+| `vitest.workers.config.ts` + `tests/workers/setup.ts` | `@cloudflare/vitest-plugin` **1.1.4** (ne starý `vitest-pool-workers`), `readD1Migrations` + `applyD1Migrations` |
+| `domains/voucher/CreditVoucherRedemptionRule.ts` | `min(zůstatek, košík)`, `now` jako **vstup** (Rule.ts determinismus), `Decimal` ne float |
+| `domains/voucher/CreditVoucherLifecycleRule.ts` | přechody přes `evaluateTransition`; **`DEPLETED` NENÍ terminální** (refundace → ACTIVE) |
+| `domains/voucher/CreditVoucherStore.ts` | interface + `InMemoryCreditVoucherStore` — vzor `core/idempotency/IdempotencyStore.ts` |
+| `workers/api/{index,hmac}.ts`, `routes/voucher.ts` | port z `~/shoptet-cart-bypass-poc/src/` |
+| `tests/unit/CreditVoucher*.test.ts` | Rules + Store, české popisky |
+| `tests/workers/voucher-{concurrency,adversarial}.test.ts` | souběh, double-spend, adversariální vstupy |
+
+---
+
+### 3. Nálezy z průzkumu, které MUSÍ do kódu
+
+**D1 `batch()` se rollbackuje jen při SQL chybě.** `UPDATE ... WHERE version = ?`,
+který nematchne žádný řádek, **není chyba** — batch projde a ostatní statements se
+zacommitují. Naivní batch (UPDATE + INSERT transakce) by tedy zapsal transakci
+i bez odečtu kreditu → voucher k utracení donekonečna.
+**Fix:** nejdřív UPDATE, ověřit `meta.changes === 1`, teprve pak INSERT. Nebo nechat
+CHECK constraint shodit celý batch.
+
+**Shoptet selektory** (ověřeno na živých košících cistytriko.cz/Disco + hecmania.cz/Classic):
+- `#discount-coupon-form` a `.js-discount-coupon-submit` **NEEXISTUJÍ**
+- správně: `.discount-coupon form`, pole `#discountCouponCode`
+- kotvit se **výhradně** na `data-testid` a na selektory z bundle `main-3g.js`, nikdy na obalové divy (ty se mezi šablonami liší)
+- `data-micro-sku` = stabilní klíč produktu pro slučování `N × 1 Kč` řádků
+- **`#continue-order-button` guard**: nevyprázdněné pole kupónu blokuje checkout
+- DOM se přepisuje po každém AJAX → překreslovat na `ShoptetDOMCartContentLoaded`, idempotentně
+- CSRF povinný na všech `/action/*`
+- token do objednávky přes `#remark` (skryté pole s vlastním `name` Shoptet zahodí)
+
+**`core/tenant/types.ts`** má duplicitní `CanonicalEntity`/`TenantId`/`EntityId`
+s komentářem "dočasně, než vznikne base.ts" — ten soubor už existuje.
+Importovat z `core/canonical/entities/base.js`.
+
+**`VoucherCouponRule` kolize je jen jmenná, ne funkční** — ověřeno: nemá jedinou
+produkční call-site, není v `createNexusPricingCalculator`. Zůstává nedotčen
+(Non-Interference). Past: legacy VOUCHER dělá `min(value, cartTotal)`, což vypadá
+jako částečné čerpání, ale zbytek zahazuje.
+
+---
+
+### 4. Nové dokumenty (commit `78201c5`)
+
+**`docs/design-proposals/ERP-Generic-Layer.md`** — Omega + Pohoda + Money S3:
+- `connectors/erp-generic/` prázdný, `Connector.ts` nikdo neimplementuje
+- **Pohoda dedupuje server-side, Omega vůbec** → slepý retry = duplicitní faktura
+- Omega nemá strojovou odpověď (úspěch z logu regexem) → `confirmationQuality: SYSTEM_CONFIRMED | LOG_INFERRED`
+- `taxRate: number` nerozliší osvobozeno/mimo předmět/PDP — dotýká se MPV ("bez DPH" ≠ "0 %")
+- `cancel()` do rozhraní nepatří (storno je účetně nový doklad)
+- blokátor: `OmegaExecutor` neověřený proti reálnému Windows agentovi
+
+**`docs/design-proposals/Shoptet-Premium-Template.md`** — konfigurovatelná šablona:
+- Shoptet **nemá editovatelné server-side šablony** (žádný Twig), HTML nevlastníme
+- blank template mode jen na Premium (~12 tis./měs) — blokuje škálovatelnost
+- nativní konfigurace = 6 barev + 2 fonty → díra pro náš konfigurátor
+- konfigurátor generuje statický `theme.css` → SFTP na shoptetí CDN, produkce nikdy nevolá naši infrastrukturu
+- dlaždice primárně **čistým CSS**, ne JS přeskládáním DOM
+- rozsah: MVP 12–15 týdnů, plný self-service 22–28 týdnů
+
+---
+
+### 5. Doporučené pořadí (můj názor, ne rozhodnutí)
+
+1. Dokončit Fázi A (seznam výše) — postaví první D1, migrace a worker entry v celém NEXUSu
+2. Fáze B na jednom klientovi — ověřit celý řetěz naostro
+3. **Až potom** šablona — s reálnou znalostí, co do ní NEXUS potřebuje
+
+NEXUS je dnes ~35 %: doménový model ~85 %, testy ~80 %, ale **runtime/deployment 0 %,
+perzistence 0 %, UI 0 %**. Voucher Fáze A je první produkční D1 v repu.
