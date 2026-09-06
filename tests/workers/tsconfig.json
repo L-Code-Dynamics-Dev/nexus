@@ -1,0 +1,35 @@
+{
+  // Samostatný tsconfig pro Workers testy.
+  //
+  // PROČ NE ROOT TSCONFIG:
+  //   Root má "moduleResolution": "node" (klasická Node10 resoluce). Ta neumí
+  //   číst pole "exports" v package.json, takže by NEROZŘEŠILA ani
+  //   "@cloudflare/vitest-plugin" (exports-only balíček), ani ambient modul
+  //   "cloudflare:test". Root se NEMĚNÍ (Non-Interference) -- 644 node testů
+  //   na něm stojí a build `tsc --noEmit` s ním prochází.
+  //
+  // Tenhle soubor root config NEROZŠIŘUJE (žádné "extends"): dědit
+  // moduleResolution "node" a hned ho přepisovat by bylo matoucí. Potřebné
+  // volby jsou zopakované explicitně.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    // Klíčové: "bundler" umí "exports" mapy -> vyřeší cloudflare:test.
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [
+      // Ambient deklarace modulu "cloudflare:test" (env, applyD1Migrations...).
+      "@cloudflare/vitest-plugin/types",
+      // Workers runtime typy (D1Database, D1Result, Response...). Plugin sám
+      // je nedodává -- dodává jen testovací API. Doporučená cesta je
+      // `wrangler types`, ta ale vyžaduje účet a vygenerovaný
+      // worker-configuration.d.ts; do té doby je tohle jediný zdroj typů.
+      "@cloudflare/workers-types"
+    ]
+  },
+  "include": ["./**/*.ts"]
+}

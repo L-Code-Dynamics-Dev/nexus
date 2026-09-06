@@ -10,5 +10,12 @@
     "declaration": true,
     "outDir": "dist"
   },
-  "include": ["core", "connectors", "domains", "tests"]
+  "include": ["core", "connectors", "domains", "tests"],
+  // tests/workers/ běží v Cloudflare workerd runtime, ne v Node -- používá
+  // ambient modul "cloudflare:test" a Workers typy (D1Database...), které
+  // root "moduleResolution": "node" neumí rozřešit (neumí číst "exports"
+  // mapy v package.json). Má proto vlastní tests/workers/tsconfig.json
+  // s "moduleResolution": "bundler". Root se kvůli tomu NEMĚNÍ -- 644 node
+  // testů na něm stojí -- jen se ta složka vyjme z jeho dosahu.
+  "exclude": ["tests/workers", "workers", "dist", "node_modules"]
 }

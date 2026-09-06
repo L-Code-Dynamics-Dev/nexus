@@ -1,0 +1,34 @@
+{
+  // Worker vrstva má vlastní tsconfig, protože root tsconfig.json cílí na
+  // Node ("moduleResolution": "node") a jeho `include` Workers vůbec nemá.
+  // Root se ZÁMĚRNĚ NEMĚNÍ (master rule Non-Interference -- je otestovaný
+  // a používá ho `npm run build` i vitest pro core/domains/connectors).
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // "bundler" místo "node": workerd načítá modul jako ESM a wrangler ho
+    // bundluje esbuildem. "node" resolution by vyžadovala psát `.js`
+    // přípony i tam, kde je bundler nechce, a rozbila by `types`
+    // z @cloudflare/workers-types.
+    "moduleResolution": "bundler",
+
+    // Worker nemá DOM ani Node globals. WebWorker lib dodá `crypto`,
+    // `Response`, `Request`, `URL`, `TextEncoder` -- tedy přesně to,
+    // co workerd runtime nabízí.
+    "lib": ["ES2022", "WebWorker"],
+
+    // Worker se nebuildí přes tsc (bundluje ho wrangler), takže .d.ts
+    // by byly jen odpad v dist/.
+    "declaration": false,
+    "noEmit": true,
+
+    // ZÁMĚRNĚ NEUVEDENO: "types": ["./worker-configuration.d.ts"].
+    // Ten soubor negenerujeme (`wrangler types`), takže odkaz na něj by
+    // build rozbil. D1Database/D1Result si typujeme minimálně sami
+    // v `types.ts` -- Worker vrstva je malá a závislost na
+    // @cloudflare/workers-types by musela být pinnutá v package.json,
+    // což je rozhodnutí mimo tenhle krok.
+    "types": []
+  },
+  "include": ["."],
+  "exclude": ["../node_modules"]
+}

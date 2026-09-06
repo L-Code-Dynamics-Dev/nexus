@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.1.4",
+    "@cloudflare/workers-types": "5.20260906.1",
     "@types/node": "22",
     "@types/papaparse": "5.5.2",
     "typescript": "5.5.4",

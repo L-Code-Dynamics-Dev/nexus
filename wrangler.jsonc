@@ -1,0 +1,59 @@
+{
+  // PRVNÍ Worker config v NEXUSu (Fáze A voucheru, 2026-09-06).
+  // JSONC místo TOML záměrně: Cloudflare doporučuje wrangler.jsonc pro nové
+  // projekty a část novějších funkcí je dostupná jen pro JSON config.
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  "name": "nexus-api",
+  "main": "workers/api/index.ts",
+  "compatibility_date": "2026-09-06",
+
+  // Structured logging / observabilita je master rule ("chyby čitelné bez dolování").
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  // ---------------------------------------------------------------------
+  // TOP-LEVEL = DEV/STAGING cíl. `wrangler dev` a `wrangler deploy` BEZ
+  // --env míří sem, nikdy na produkční kredity.
+  //
+  // POZOR: `d1_databases` se do `env.*` NEDĚDÍ (stejně jako vars,
+  // kv_namespaces, durable_objects, r2_buckets, services, queues).
+  // Musí být v každém prostředí zopakováno CELÉ -- když se na to zapomene,
+  // produkční Worker nemá binding vůbec, nezdědí dev databázi.
+  // ---------------------------------------------------------------------
+  "d1_databases": [
+    {
+      "binding": "DB",
+      // Docs doporučují adresovat migrace přes database_name, ne binding:
+      // binding se může přejmenovat, jméno databáze ne. Chrání to před
+      // aplikací migrace na špatný cíl.
+      "database_name": "nexus-voucher-dev",
+      "database_id": "<vyplnit-po-wrangler-d1-create>",
+      "preview_database_id": "<vyplnit-po-wrangler-d1-create>",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "env": {
+    "production": {
+      "name": "nexus-api-production",
+      "observability": { "enabled": true },
+      // Fyzicky oddělená databáze, ne jen jiný preview_database_id.
+      // U kreditních dat nechceme, aby `wrangler deploy` bez --env mohl
+      // sáhnout na produkční zůstatky.
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "nexus-voucher",
+          "database_id": "<vyplnit-po-wrangler-d1-create>",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
+  }
+
+  // HMAC_SECRET se NIKDY nepíše sem ani do vars -- jen
+  // `wrangler secret put HMAC_SECRET` (příp. Secrets Store).
+}
