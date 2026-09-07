@@ -2,14 +2,34 @@
 
 ## ⚠️ PRO LUCKYHO — PŘEČTI RÁNO JAKO PRVNÍ (7.9. noc)
 
-### 🔴 ŽIVÝ PRODUKČNÍ BUG: zákazník vidí jinou cenu, než zaplatí
+### 🔴 ŽIVÝ PRODUKČNÍ BUG: badge ukazuje HORŠÍ cenu, než zákazník dostane
 
-**Kód 93683 (DELPHIN), tier ZR25: badge ukazuje 12,71 €, ceník má 11,21 €.
-Rozdíl 1,50 € na jednom produktu.**
+**Kód 93683 (Čelovka DELPHIN Compact), tier ZR25: badge ukazuje 12,71 €,
+ceník má 11,21 €. Rozdíl 1,50 €.**
 
-Příčina: `pricing-bridge.ts:87` posílá root enginu `allowLoyaltyDiscount: true`
-**natvrdo**, zatímco worker engine čte `applyLoyaltyDiscount` z feedu. Když má
-produkt ve feedu `=0`, oba enginy se rozejdou.
+**Který údaj je správný — ověřeno (Lucky, 7.9.):** pravidlo zní *„DELPHIN má
+celoroční akci 15 %; když má tier nižší %, zákazník dostane 15 %, když má tier
+vyšší než 15 %, dostane cenu tieru — a pak se ještě zohlední strop."*
+
+Tedy **vyhrává vyšší sleva, nesčítá se**. Pro 93683 (base 14,94):
+
+| Tier | Sleva tieru | Akce | Vyhrává | Cena |
+|---|---|---|---|---|
+| ZR25 | 25 % | 15 % | **tier** | 11,21 |
+| ZR8 | 8 % | 15 % | **akce** | 12,70 |
+
+Ověřeno výpočtem přes `HighestDiscountRule` na reálných datech z feedu —
+NEXUS toto pravidlo implementuje **správně** (`LOYALTY` 11,205 pro ZR25,
+`SALE` 12,70 pro ZR8).
+
+**Správně je tedy ceník (11,21). Chybu má badge.** Zákazník se ZR25 vidí
+na produktu cenu, jako by měl jen akci, ale v košíku zaplatí správnou nižší.
+Není to únik peněz — je to opačný směr: **ukazujeme horší nabídku, než jakou
+reálně dáváme**, a někdo kvůli tomu nekoupí.
+
+Příčina rozdílu mezi enginy: `pricing-bridge.ts:87` posílá root enginu
+`allowLoyaltyDiscount: true` **natvrdo**, zatímco worker engine čte
+`applyLoyaltyDiscount` z feedu. Když má produkt ve feedu `=0`, rozejdou se.
 
 Ve feedu má `applyLoyaltyDiscount=0` **osm produktů**. U šesti z nich to náhodou
 maskuje zero-discount limit nebo sale-wins větev — takže se to neprojeví.

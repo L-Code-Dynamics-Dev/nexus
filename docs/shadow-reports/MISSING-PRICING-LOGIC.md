@@ -201,6 +201,29 @@ Ze zadání jsem řešil čtyři body. Z §3.1 zbývají nedotčené:
 - **Napojení na data** (KV, Shoptet API, feed) — mimo scope.
 - **coupon policy interakce s cenou** (§3.4) — mimo scope.
 
+### 4.4b BUSINESS PRAVIDLO potvrzené Luckym (7.9.) — brandSale vs. loyalty
+
+Doslovně: *„DELPHIN má celoroční akci 15 %. Když má tier nižší %, zákazník
+automaticky dostává 15 %. Když je tier vyšší než 15 %, dostane cenu toho
+tieru — ale musí se zohlednit, jestli produkt nemá strop pro maximální slevu."*
+
+Tedy pořadí:
+1. **max(brandSale, loyaltyTier)** — vyhrává VYŠŠÍ sleva, NIKDY se nesčítají
+2. **potom** se aplikuje strop (`productMaxDiscount` / `brandLimits`)
+
+Ověřeno výpočtem na 93683 (base 14,94, DELPHIN, brandSale 15 %):
+
+| Tier | Sleva tieru | Vyhrává | Výsledek |
+|---|---|---|---|
+| ZR25 | 25 % | tier | `LOYALTY` 11,205 |
+| ZR8 | 8 % | akce | `SALE` 12,70 |
+
+`HighestDiscountRule` v NEXUSu to implementuje správně (bod 4 v jeho
+hlavičce: „když jsou OBĚ definované, NIŽŠÍ cena vyhrává"), a
+`DiscountLimitRule` běží v řetězu za ním, takže strop se uplatní potom.
+
+DELPHIN mimochodem **nemá** `brandLimit` — jen `brandSaleDiscounts: 0.15`.
+
 ### 4.5 Kde si nejsem jistý shodou
 
 - ~~**Strop 0 % se chová jako ŽÁDNÝ strop.**~~ **VYŘEŠENO — Lucky potvrdil
