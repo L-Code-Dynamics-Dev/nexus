@@ -89,12 +89,13 @@ Detaily: `docs/shadow-reports/MISSING-PRICING-LOGIC.md`
 ---
 
 
-## 2026-09-07 (noc) — P0 hotové, P1 hotové, 935 testů
+## 2026-09-07 (noc) — P0 i P1 hotové, 948 testů
 
 Větev `chore/vitest-4-upgrade`, vše pushnuto, CI zelené.
 
 | Commit | Co |
 |---|---|
+| `7cb7237` | P1 IntentReconciliation — **řetěz uzavřen** |
 | `277af82` | **první implementace Connector kontraktu** (byla nula) |
 | `eb64217` | P1 perzistence Intentů — migrace 0003 + Store |
 | `5fef6fb` | shadow harness — **našel živý produkční bug s cenou** |
@@ -103,18 +104,41 @@ Větev `chore/vitest-4-upgrade`, vše pushnuto, CI zelené.
 | `4458641` | P0 dokončeno + ExecutionIntent vrstva |
 | `ebdb2fd` | P0.1 jeden zdroj pravdy pro canonical typy |
 
-**Testy: 935/935** (večer bylo 754), tsc čistý, D1 testy 19/19 na CI.
+**Testy: 948/948** (večer bylo 754), tsc čistý, D1 testy 19/19 na CI.
 
-### Řetěz z Reconciliation.ts je teď celý otypovaný
+### Řetěz z Reconciliation.ts je celý otypovaný
 
 ```
 SOURCE → DECISION → EXPECTED → EXECUTION → ACTUAL → RECONCILIATION
-          ✅         ✅ NOVÉ    ✅ NOVÉ                ✅
+   ✅       ✅        ✅ NOVÉ    ✅ NOVÉ      ✅        ✅ NOVÉ
 ```
 
-Do včerejška existovaly jen konce. `ExecutionIntent` + `IntentExecutor` +
-`ExecutionIntentStore` + migrace 0003 doplnily prostředek — a
-`ShoptetPriceConnector` je první důkaz, že Connector kontrakt je použitelný.
+Do včerejška existovaly jen konce (`Decision`, `ReconciliationItemResult`).
+Prostředek — „co konkrétně se má stát ve vnějším systému" — typ neměl,
+takže si ho každá doména vyráběla jinak. Teď je v `core/canonical/outcomes/`:
+
+| Soubor | Role |
+|---|---|
+| `ExecutionIntent.ts` | zamýšlený zápis jako DATA (uložit, přehrát, zahodit) |
+| `IntentExecutor.ts` | provedení + překlad odpovědi konektoru |
+| `ExecutionIntentStore.ts` | perzistence, atomické nárokování, fronta nejistot |
+| `IntentReconciliation.ts` | rozřešení UNKNOWN proti skutečnému stavu |
+| `migrations/0003_execution_intents.sql` | D1 schéma |
+
+Plus `connectors/shoptet/ShoptetPriceConnector.ts` — první důkaz, že
+`Connector` kontrakt je použitelný (`implements Connector` mělo do včerejška
+nula výskytů).
+
+**Nosná myšlenka celé vrstvy:** `UNKNOWN` je plnohodnotný stav vedle
+`FAILED`, odlišený na úrovni typu. Kdo obojí splácne do „nepovedlo se",
+napíše slepý retry — a u Omegy, která nededuplikuje, je to cesta
+k duplicitní faktuře.
+
+### Co zbývá k P2
+
+- D1 implementace `ExecutionIntentStore` (dnes jen InMemory)
+- Napojit existující legacy porty na `Connector` rozhraní (79 souborů)
+- Zapojit nové pricing Rules do chainu — **rozhodnutí Lucky**, mění ceny
 
 ### P0 — hotové celé
 

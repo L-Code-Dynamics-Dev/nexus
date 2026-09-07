@@ -100,6 +100,8 @@ export interface ExecutionIntentStore {
     claimForExecution<TPayload, TExpected>(
         context: TenantContext,
         intentId: EntityId,
+        /** Čas jako VSTUP, ne `Date.now()` uvnitř -- determinismus a testy. */
+        claimedAt: string,
     ): Promise<ClaimIntentOutcome<TPayload, TExpected>>;
 
     /** Zapíše výsledek provedení a přepne stav. */
@@ -174,6 +176,7 @@ export class InMemoryExecutionIntentStore implements ExecutionIntentStore {
     async claimForExecution<TPayload, TExpected>(
         context: TenantContext,
         intentId: EntityId,
+        claimedAt: string,
     ): Promise<ClaimIntentOutcome<TPayload, TExpected>> {
         assertTenantContext(context, 'InMemoryExecutionIntentStore.claimForExecution');
 
@@ -197,6 +200,7 @@ export class InMemoryExecutionIntentStore implements ExecutionIntentStore {
         const claimed: ExecutionIntent = {
             ...intent,
             state: 'EXECUTING',
+            updatedAt: claimedAt,
             attempt: intent.state === 'FAILED' || intent.state === 'UNKNOWN'
                 ? intent.attempt + 1
                 : intent.attempt,

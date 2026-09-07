@@ -82,7 +82,7 @@ describe('claimForExecution -- atomické nárokování', () => {
     });
 
     it('PLANNED -> CLAIMED se stavem EXECUTING', async () => {
-        const result = await store.claimForExecution(TENANT, 'intent-1');
+        const result = await store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z');
 
         expect(result.outcome).toBe('CLAIMED');
         if (result.outcome === 'CLAIMED') {
@@ -92,24 +92,24 @@ describe('claimForExecution -- atomické nárokování', () => {
 
     it('druhý pokus o nárokování dostane ALREADY_EXECUTING', async () => {
         // Tohle je jádro atomicity: dva běhy, právě jeden smí zapisovat.
-        await store.claimForExecution(TENANT, 'intent-1');
-        const second = await store.claimForExecution(TENANT, 'intent-1');
+        await store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z');
+        const second = await store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z');
 
         expect(second.outcome).toBe('ALREADY_EXECUTING');
     });
 
     it('paralelní nárokování: právě jeden uspěje', async () => {
         const results = await Promise.all([
-            store.claimForExecution(TENANT, 'intent-1'),
-            store.claimForExecution(TENANT, 'intent-1'),
-            store.claimForExecution(TENANT, 'intent-1'),
+            store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z'),
+            store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z'),
+            store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z'),
         ]);
 
         expect(results.filter((r) => r.outcome === 'CLAIMED')).toHaveLength(1);
     });
 
     it('hotový Intent (EXECUTED) se nedá nárokovat znovu', async () => {
-        await store.claimForExecution(TENANT, 'intent-1');
+        await store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z');
         await store.recordOutcome(TENANT, {
             intentId: 'intent-1',
             nextState: 'EXECUTED',
@@ -117,7 +117,7 @@ describe('claimForExecution -- atomické nárokování', () => {
             recordedAt: '2026-09-07T04:01:00Z',
         });
 
-        const result = await store.claimForExecution(TENANT, 'intent-1');
+        const result = await store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z');
         expect(result.outcome).toBe('WRONG_STATE');
         if (result.outcome === 'WRONG_STATE') {
             expect(result.currentState).toBe('EXECUTED');
@@ -125,7 +125,7 @@ describe('claimForExecution -- atomické nárokování', () => {
     });
 
     it('retry po FAILED inkrementuje attempt, nezakládá nový Intent', async () => {
-        await store.claimForExecution(TENANT, 'intent-1');
+        await store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z');
         await store.recordOutcome(TENANT, {
             intentId: 'intent-1',
             nextState: 'FAILED',
@@ -133,7 +133,7 @@ describe('claimForExecution -- atomické nárokování', () => {
             recordedAt: '2026-09-07T04:01:00Z',
         });
 
-        const retry = await store.claimForExecution(TENANT, 'intent-1');
+        const retry = await store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z');
         expect(retry.outcome).toBe('CLAIMED');
         if (retry.outcome === 'CLAIMED') {
             // Historie pokusů se drží na jednom Intentu, ne rozsypaná
@@ -144,7 +144,7 @@ describe('claimForExecution -- atomické nárokování', () => {
 
     it('cizí tenant dostane NOT_FOUND, ne chybu', async () => {
         // Rozdíl v odpovědi by prozradil existenci Intentů napříč tenanty.
-        const result = await store.claimForExecution(OTHER_TENANT, 'intent-1');
+        const result = await store.claimForExecution(OTHER_TENANT, 'intent-1', '2026-09-07T04:00:30Z');
         expect(result.outcome).toBe('NOT_FOUND');
     });
 });
@@ -154,7 +154,7 @@ describe('recordOutcome -- fail-closed přechody', () => {
     beforeEach(async () => {
         store = new InMemoryExecutionIntentStore();
         await store.plan(TENANT, planInput());
-        await store.claimForExecution(TENANT, 'intent-1');
+        await store.claimForExecution(TENANT, 'intent-1', '2026-09-07T04:00:30Z');
     });
 
     it('EXECUTED bez confirmationQuality se odmítne', async () => {
@@ -213,7 +213,7 @@ describe('findRequiringReconciliation -- fronta nejistot', () => {
 
     async function seed(id: string, key: string): Promise<void> {
         await store.plan(TENANT, planInput({ id, idempotencyKey: key }));
-        await store.claimForExecution(TENANT, id);
+        await store.claimForExecution(TENANT, id, '2026-09-07T04:00:30Z');
     }
 
     it('zahrne UNKNOWN', async () => {
@@ -286,7 +286,7 @@ describe('findPending -- fronta k provedení', () => {
         const store = new InMemoryExecutionIntentStore();
         await store.plan(TENANT, planInput({ id: 'i-1', idempotencyKey: 'k1' }));
         await store.plan(TENANT, planInput({ id: 'i-2', idempotencyKey: 'k2' }));
-        await store.claimForExecution(TENANT, 'i-2');
+        await store.claimForExecution(TENANT, 'i-2', '2026-09-07T04:00:30Z');
 
         const pending = await store.findPending('tenant-a', 10);
         expect(pending.map((i) => i.id)).toEqual(['i-1']);
