@@ -874,3 +874,43 @@ výnos k zaúčtování."*
 Sloupec patří do `vouchers` (migrace navazující na `0001`), ne do
 `voucher_transactions`: není to pohyb kreditu, je to **zůstatek, který
 se pohybem nikdy nestal**.
+
+### 18.7 AUDIT_VOUCHER_REDEMPTION -- závazný tok (Lucky, 7.9.)
+
+Čtyři kroky, pořadí je závazné:
+
+```
+1. WEBHOOK (< 4 s)
+   Z payloadu se přebere POUZE `eventInstance` (číslo objednávky).
+   Nic jiného tam není. Ověřit podpis, vrátit 200.
+        │
+2. ctx.waitUntil()  -- až PO odpovědi
+   Založí ExecutionIntent { operation: 'AUDIT_VOUCHER_REDEMPTION',
+                            targetRef: <číslo objednávky> }
+   Stav EXECUTING se PERZISTUJE PŘED voláním Shoptetu.
+        │
+3. WORKER FETCH
+   GET /api/orders/{eventInstance}
+   -> vytáhnout pole slev / uplatněných poukazů
+   -> spočítat SKUTEČNĚ uplatněnou částku
+   -> porovnat proti nominálu v D1
+        │
+4. AUDIT ZÁPIS
+   burned_unclaimed_amount = nominál − skutečně uplatněno
+   Intent -> EXECUTED
+```
+
+**Když API selže** (429, 503, timeout): Intent skončí v `UNKNOWN`
+a reconciliační smyčka (Cron Trigger) si ho v dalším běhu vyzvedne,
+ověří stav idempotentním GETem a dokončí.
+
+**Proč `AUDIT_VOUCHER_REDEMPTION` a ne prosté "dotáhni objednávku":**
+je to samostatný Intent s vlastním životním cyklem, takže se dá kdykoli
+zjistit, u kterých objednávek audit ještě neproběhl -- `findRequiringReconciliation()`
+je vrátí. Bez Intentu by nedotažená objednávka zmizela beze stopy a chybějící
+účetní podklad by se objevil až při uzávěrce.
+
+**Vztah k `MULTI_USE`:** tam je Intent jiný (`REDUCE_VOUCHER_BALANCE`,
+§18.5) a mění stav. `AUDIT_VOUCHER_REDEMPTION` je **jen čtení a zápis
+do vlastní D1** -- do Shoptetu nezapisuje nic, takže ho `ReadOnlyGuard`
+nechá projít i na produkčním tokenu.
