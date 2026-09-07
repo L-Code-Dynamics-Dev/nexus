@@ -246,3 +246,37 @@ To je přesně důvod, proč má NEXUS `requiresReconciliation()` a rozlišení
 - Kupónová logika (`CouponPolicyRule`) je samostatná vrstva nad ceníky,
   ne součást hlavního cenového řetězu — a dnes není zapojená
   v `createNexusPricingCalculator`.
+
+---
+
+## 8. ZAPISUJÍ SE JEN ZMĚNY (Lucky, 7.9.)
+
+> *"vždycky se zapisují pouze změny do KV"*
+
+Sync **nikdy nepřepisuje celý katalog**. Spočítá ceny, porovná je proti
+KV cache a do Shoptetu pošle **jen to, co se liší**.
+
+**Proč to není optimalizace, ale nutnost:**
+
+- 17 448 produktů × 10 ceníků = **174 480 hodnot**. Plný přepis při každém
+  běhu by znamenal statisíce API volání.
+- Shoptet má rate limiter. Plný zápis by ho vyčerpal a sync by nedoběhl.
+- Sync běží řádově každých 15 minut a při webhooku. Přepisovat pokaždé
+  všechno by znamenalo, že se produkt mění i tehdy, když se nezměnil --
+  a `changeTime` v Shoptetu by přestal nést informaci.
+
+**Důsledky, na které se musí myslet:**
+
+1. **KV cache je součást správnosti, ne jen rychlosti.** Když se rozejde se
+   skutečností v Shoptetu, sync přestane zapisovat změny, o kterých neví.
+   Přesně tenhle typ selhání je INC-010: pipeline 12 dní tiše no-opla,
+   každý běh hlásil SUCCESS, a 812 produktů zatím ujelo na špatnou cenu.
+2. **Reconciliace nesmí věřit cache.** Musí porovnávat proti tomu, co je
+   reálně v Shoptetu -- jinak by ověřovala vlastní předpoklad.
+3. **Pro NEXUS to platí stejně.** Až bude cenový engine zapisovat, musí
+   generovat `ExecutionIntent` jen pro skutečné změny. `expectedState`
+   v Intentu je pak právě ta nová hodnota a reconciliace ji porovná
+   s realitou.
+
+**Nezapisovat nic** je legitimní a nejčastější výsledek běhu -- ne známka
+toho, že se něco nepovedlo.
