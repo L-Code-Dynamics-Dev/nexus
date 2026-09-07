@@ -730,3 +730,90 @@ ne na to spoléhat.
 Čtecí část jde postavit hned: validace kódu, přepočet částky, čtení
 objednávky přes `/api/orders`. Chybí jen spouštěč -- a ten je závislý
 na rozhodnutí výše.
+
+---
+
+## 18. ZMĚNA MECHANIKY: fixní kupón místo kredit produktu (Lucky, 7.9.)
+
+### 18.1 Co se mění
+
+Návrh §6 stál na tom, že se do košíku vloží kredit produkt `N × 1 Kč`
+a vynuluje ho 100% kupón. **To bylo zbytečně složité.**
+
+Lucky: *"Shoptet nativně umí vytvořit slevový kód na libovolnou korunovou
+hodnotu. Nemusíme do košíku podstrkávat žádné virtuální 1Kč produkty ani
+manipulovat s kategoriemi -- kód funguje jako virtuální bankovka s přesnou
+hodnotou na celý košík."*
+
+Model `N × 1 Kč` je workaround pro platformy, které fixní kupón neumí.
+Shoptet ho umí, takže se nepoužije.
+
+**Co tím padá:** kredit produkt, cart masking, kategorie pro kupón,
+omezení kupónu na produkt. Celá sekce §6.1 a §6.2 se tím zjednodušuje.
+
+**Co zůstává beze změny:** D1 jako zdroj pravdy o zůstatku, atomické
+čerpání optimistickým zámkem (§7), idempotence webhooku, MPV režim (§15).
+
+### 18.2 Dva režimy řízené tenant konfigurací
+
+Rozhodnutí Lucky: NEXUS musí zvládnout obojí, volba je konfigurace tenanta,
+ne větev v kódu.
+
+```ts
+export interface TenantVoucherConfig {
+    tenantId: string;
+    mode: 'ONE_TIME' | 'MULTI_USE';
+    thresholdGold: number;     // hranice pro GOLD/SILVER šablonu PDF
+    allowPartialBurn: boolean;
+}
+```
+
+**`ONE_TIME`** -- Worker vygeneruje v Shoptetu fixní kupón na celou částku.
+Uplatněním se spálí; je-li košík menší, **zbytek propadá bez náhrady**.
+D1 drží auditní záznam o vystavení.
+
+**`MULTI_USE`** -- D1 drží reálný zůstatek. Po každém čerpání se přes
+Shoptet API smaže starý kupón a vytvoří nový se **stejným kódem** na
+nový zůstatek.
+
+### 18.3 Dvě věci, které z toho plynou a musí se ošetřit
+
+**(a) `MULTI_USE`: mezi smazáním a vytvořením je okno.**
+
+Jsou to dvě API volání. Když druhé selže (rate limit, výpadek, timeout),
+zákazník má kredit v D1, ale **žádný funkční kupón v Shoptetu** -- kód mu
+přestane fungovat, přestože nárok má.
+
+Řešení už v repu existuje: `core/canonical/outcomes/` -- `ExecutionIntent`
+se stavem `UNKNOWN` a reconciliační smyčka. Přegenerování kupónu MUSÍ jít
+přes tuhle vrstvu, ne dvěma přímými `fetch` voláními. Jinak se ta chyba
+nikdy nedozvíme.
+
+Pořadí je navíc závazné: **nejdřív vytvořit nový, potom smazat starý.**
+Opačně by okno znamenalo, že zákazník nemá kupón vůbec; takhle má
+v nejhorším případě dva, což je detekovatelné a opravitelné.
+
+**(b) `ONE_TIME`: nevíme, kolik propadlo.**
+
+Když D1 drží jen auditní záznam o vystavení, NEXUS se nikdy nedozví,
+jestli zákazník vyčerpal celou částku, nebo jen část. Shoptet to nehlásí.
+
+Pro §15 (víceúčelový poukaz) to může vadit: **nevyčerpaný poukaz je
+závazek**, a ten se v účetnictví sleduje. Doporučuji i v `ONE_TIME` režimu
+zpracovat order webhook a zapsat skutečně čerpanou částku -- je to jeden
+zápis navíc a dá to podklad pro účetní.
+
+**Není to blokující.** Je to věc, o které je lepší rozhodnout teď než
+až se na ni zeptá účetní.
+
+### 18.4 Dopad na už napsaný kód
+
+Beze změny zůstává: `CreditVoucher` entita, `CreditVoucherStore` + D1
+implementace, atomické čerpání, `SecurityCoordinator`, webhook příjem,
+`ReadOnlyGuard`.
+
+Přibude: `TenantVoucherConfig`, generování Shoptet kupónu, a v `MULTI_USE`
+jeho přegenerování přes `ExecutionIntent`.
+
+Odpadá: kredit produkt, cart masking, kategorie -- tedy podstatná část
+frontend vrstvy, která se ještě nepsala.
