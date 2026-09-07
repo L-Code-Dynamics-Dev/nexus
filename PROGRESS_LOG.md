@@ -89,18 +89,32 @@ Detaily: `docs/shadow-reports/MISSING-PRICING-LOGIC.md`
 ---
 
 
-## 2026-09-07 (noc) — P0 hotové, P1 základ, 892 testů
+## 2026-09-07 (noc) — P0 hotové, P1 hotové, 935 testů
 
-Větev `chore/vitest-4-upgrade`, vše pushnuto.
+Větev `chore/vitest-4-upgrade`, vše pushnuto, CI zelené.
 
 | Commit | Co |
 |---|---|
-| `10d5a0c` | P1 IntentExecutor -- most Intent → Connector |
-| `adce7f3` | 4 chybějící pricing Rules + nález o okfishi |
+| `277af82` | **první implementace Connector kontraktu** (byla nula) |
+| `eb64217` | P1 perzistence Intentů — migrace 0003 + Store |
+| `5fef6fb` | shadow harness — **našel živý produkční bug s cenou** |
+| `10d5a0c` | P1 IntentExecutor — most Intent → Connector |
+| `adce7f3` | 4 chybějící pricing Rules |
 | `4458641` | P0 dokončeno + ExecutionIntent vrstva |
 | `ebdb2fd` | P0.1 jeden zdroj pravdy pro canonical typy |
 
-**Testy: 892/892** (ráno bylo 754), tsc čistý, D1 testy 19/19 na CI.
+**Testy: 935/935** (večer bylo 754), tsc čistý, D1 testy 19/19 na CI.
+
+### Řetěz z Reconciliation.ts je teď celý otypovaný
+
+```
+SOURCE → DECISION → EXPECTED → EXECUTION → ACTUAL → RECONCILIATION
+          ✅         ✅ NOVÉ    ✅ NOVÉ                ✅
+```
+
+Do včerejška existovaly jen konce. `ExecutionIntent` + `IntentExecutor` +
+`ExecutionIntentStore` + migrace 0003 doplnily prostředek — a
+`ShoptetPriceConnector` je první důkaz, že Connector kontrakt je použitelný.
 
 ### P0 — hotové celé
 
