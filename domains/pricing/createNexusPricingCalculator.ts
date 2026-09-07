@@ -39,6 +39,7 @@ import { assertTenantContext, type TenantContext } from '../../core/tenant/types
 import type { LegacyPricingInput, LegacyPricingResult } from './PricingAdapter.js';
 import type { PricingConfigurationProvider } from './PricingConfigurationProvider.js';
 import { BasePriceRule } from './BasePriceRule.js';
+import { BrandSaleDiscountRule } from './BrandSaleDiscountRule.js';
 import { HighestDiscountRule } from './HighestDiscountRule.js';
 import { DiscountLimitRule } from './DiscountLimitRule.js';
 import { RoundingRule } from './RoundingRule.js';
@@ -77,8 +78,16 @@ export function createNexusPricingCalculator(
     const categoryLimits = toDecimalMap(config.categoryLimits);
     const validTiers = Object.keys(config.loyaltyTiers);
 
+    // brandSaleDiscounts -- celoroční akce per značka (DELPHIN 15 %,
+    // MIVARDI 10 %, MIKADO 9 %). NENÍ totéž co brandLimits, i když u MIVARDI
+    // se čísla náhodou shodují: sleva a strop jsou dvě nezávislá pravidla
+    // (viz docs/SHOPTET-PRICING-MODEL.md §6c a okfish
+    // CORE_LOGIC_AND_VALIDATION.md §1.3 -- "never derive one from the other").
+    const brandSaleDiscounts = toDecimalMap(config.brandSaleDiscounts);
+
     const ctx = { tenantId: tenant.tenantId, ruleVersion: '1' };
     const basePriceRule = new BasePriceRule({ ...ctx, ruleId: 'base-price-v1' });
+    const brandSaleDiscountRule = new BrandSaleDiscountRule({ ...ctx, ruleId: 'brand-sale-v1' });
     const highestDiscountRule = new HighestDiscountRule({ ...ctx, ruleId: 'highest-discount-v1' });
     const discountLimitRule = new DiscountLimitRule({ ...ctx, ruleId: 'discount-limit-v1' });
     const roundingRule = new RoundingRule({ ...ctx, ruleId: 'rounding-v1' });
@@ -92,9 +101,31 @@ export function createNexusPricingCalculator(
         let currentPrice = base.price;
         const appliedRules: { rule: string }[] = [{ rule: base.rule }];
 
+        // brandSale syntéza -- MUSÍ být PŘED HighestDiscountRule.
+        //
+        // Okfish to dělá v `calculateAllTierPrices()` hned po no-op guardu:
+        // nemá-li produkt vlastní akční cenu a jeho značka má celoroční akci,
+        // akční cena se DOPOČÍTÁ. Od té chvíle je to obyčejná akční cena
+        // a všechna navazující pravidla (max(akce, tier), clearance-vs-cap)
+        // se na ni vztahují beze změny.
+        //
+        // Kdyby to běželo až za HighestDiscountRule, syntetizovaná cena by
+        // se s tierem nikdy neporovnala a DELPHIN/MIKADO/MIVARDI by
+        // na nízkých tierech dostaly horší cenu, než mají mít.
+        const brandSale = brandSaleDiscountRule.evaluate({
+            basePrice: input.basePrice,
+            effectiveSalePrice: input.salePrice,
+            manufacturer: input.manufacturer,
+            brandSaleDiscounts,
+        });
+        const effectiveSalePrice = brandSale.effectiveSalePrice;
+        if (brandSale.applied) {
+            appliedRules.push({ rule: 'BRAND_SALE' });
+        }
+
         const highest = highestDiscountRule.evaluate({
             basePrice: input.basePrice,
-            salePrice: input.salePrice,
+            salePrice: effectiveSalePrice,
             customerTier: input.customerTier,
             allowLoyaltyDiscount: input.allowLoyaltyDiscount,
             loyaltyTiers,
@@ -107,7 +138,12 @@ export function createNexusPricingCalculator(
         const limit = discountLimitRule.evaluate({
             basePrice: input.basePrice,
             currentPrice,
-            salePrice: input.salePrice,
+            // Tatáž syntetizovaná cena, ne `input.salePrice`. Clearance-vs-cap
+            // pravidlo (okfish pricing.ts:143-164) říká, že je-li aktivní strop
+            // A ZÁROVEŇ akční cena, akční cena vyhrává absolutně. Kdyby sem
+            // přišlo `undefined`, strop by u brandSale produktů zaklapl na
+            // loyalty-only větev a osekl cenu, která se oseknout nemá.
+            salePrice: effectiveSalePrice,
             productMaxDiscount: input.productMaxDiscount,
             manufacturer: input.manufacturer,
             category: input.category,

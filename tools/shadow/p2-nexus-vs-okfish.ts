@@ -43,6 +43,14 @@ const OKFISH_TENANT: TenantContext = { tenantId: 'okfish_sk', platform: 'shoptet
 
 export type P2Class =
     | 'BRAND_SALE_MISSING'
+    /**
+     * brandSale se liší o nejvýš 1 haléř: root/bridge počítá
+     * `Math.round(base*(1-d)*100)/100` nad floatem, NEXUS přes Decimal.
+     * `2.30*0.85` = `1.9549999999999998` -> root 1.95, NEXUS správných 1.96.
+     * NEXUS se tím shoduje s okfish WORKER enginem (integer-cents).
+     * Očekávané, ne nález.
+     */
+    | 'BRAND_SALE_ROUNDING'
     | 'NOOP_ACTION'
     | 'LIMIT_SOURCE'
     | 'CLEARANCE_WINDOW'
@@ -98,8 +106,28 @@ function classify(
     //    Nejsilnější důkaz -- je to čistě vlastnost vstupu, nezávislá na tieru.
     if (noopAction) return 'NOOP_ACTION';
 
-    // 2) brandSale syntéza: okfish si actionPrice dopočítá, NEXUS ne.
-    if (p.brandSaleApplies) return 'BRAND_SALE_MISSING';
+    // 2) brandSale.
+    //
+    // Od 2026-09-07 je `BrandSaleDiscountRule` součástí kanonického chainu
+    // a konfiguraci dostává přes port, takže "NEXUS neumí brandSale" už
+    // NENÍ platná příčina. Co zbývá, je HALÉŘOVÁ ODCHYLKA V ZAOKROUHLENÍ:
+    //
+    //   root/bridge: Math.round(base * (1-d) * 100) / 100  -- nad floatem
+    //   NEXUS:       Decimal, přes celé haléře
+    //
+    // `2.30 * 0.85` je ve floatu `1.9549999999999998`, takže root dá 1.95,
+    // NEXUS správných 1.96. Ověřeno v P3 jako `BRAND_SALE_ROUNDING` --
+    // a NEXUS se tam shoduje s okfish WORKER enginem, který to počítá
+    // přes integer-cents stejně. Rozchází se tedy jen s bridgem, a to
+    // v jeho neprospěch.
+    //
+    // Odchylka je maximálně 1 haléř a projeví se jen na tierech, kde
+    // brandSale vyhrává nad loyalty (ZR4-ZR14).
+    if (p.brandSaleApplies) {
+        return Math.abs(nexus - okfish) <= 0.0101
+            ? 'BRAND_SALE_ROUNDING'
+            : 'BRAND_SALE_MISSING';
+    }
 
     // 3) Skládání PRODUCT_LIMITS: v 'naive' NEXUS limit vůbec nedostal.
     if (mode === 'naive' && p.productLimit !== undefined) {
@@ -161,6 +189,12 @@ export async function runP2(opts: {
         loyaltyTiers: cfg.loyaltyTiersRatio,
         brandLimits: cfg.brandLimits,
         categoryLimits: cfg.categoryLimits,
+        // Zapojeno 2026-09-07 (rozhodnutí Lucky): BrandSaleDiscountRule je
+        // teď součástí kanonického chainu, takže konfiguraci dostává PŘES
+        // PORT, ne obcházením v `adapted` režimu. Do té doby si brandSale
+        // syntézu dělal harness sám v `toNexusInput` -- proto `naive`
+        // i `with-limits` hlásily BRAND_SALE_MISSING, i když Rule existovala.
+        brandSaleDiscounts: cfg.brandSaleDiscounts,
     });
     const nexusCalc = createNexusPricingCalculator(provider, OKFISH_TENANT);
 
