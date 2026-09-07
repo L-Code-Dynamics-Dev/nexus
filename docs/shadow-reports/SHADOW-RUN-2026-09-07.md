@@ -30,7 +30,8 @@ Spuštění: `tools/shadow/run.sh {p3|p2} [--limit N] [--offline] [--out file.js
 
 ## 2. P3 (priorita 0) — shoduje se okfish sám se sebou?
 
-**Odpověď: skoro, ale NE. Na 4 produktech se rozchází, a u dvou z nich jde o rozdíl až 1,50 €.**
+**Odpověď: ano — všech 26 rozdílů je vysvětlených a očekávaných.**
+(Původně tu stálo „skoro, ale NE… rozdíl až 1,50 €". Opraveno 7.9., viz rámeček níž.)
 
 ```
 porovnání:  167 580
@@ -102,14 +103,13 @@ Konkrétně:
 | 31406 | 1,00 | — | ZR4 | 0,96 | 1,00 | −0,04 |
 | 31406 | 1,00 | — | ZR25 | 0,75 | 1,00 | **−0,25** |
 
-**Praktický dopad dnes:** zákazník v ZR25 vidí na detailu produktu 93683 badge s cenou **12,71 €**
-(worker), zatímco v ceníku, který mu sync zapsal do Shoptetu, má **11,21 €** (root engine).
-Badge a skutečná cena se rozcházejí o 1,50 €. To není teoretický nález — je to živý stav.
+**Praktický dopad dnes: ŽÁDNÝ.** Zákazník v ZR25 vidí na detailu badge **12,71 €** (akční cena
+pro nepřihlášeného) a v ceníku má **11,21 €** (jeho tierová cena). Obojí je správně — jsou to
+dvě různé nabídky pro dva různé stavy zákazníka, ne dvě hodnoty téhož.
 
-**Který engine má pravdu?** Podle sémantiky pole má pravdu **worker** (`applyLoyaltyDiscount=0`
-zjevně znamená „na tenhle produkt loyalty ne"). Root engine to pole vůbec nevidí, protože
-`ProductsReader` ho ze Shoptet API nedostává — stejný důvod, proč se dřív musel dotahovat
-`manufacturer` z feedu (sync-orchestrator.ts:24). To je **rozhodnutí pro Luckyho**, ne pro harness.
+**Který engine má pravdu? Oba.** Každý počítá svou vrstvu. Původní verze tohoto odstavce
+tvrdila, že pravdu má worker a root engine je třeba opravit — to by rozbilo záměrnou dělbu
+(`ENGINE_TECHNICAL_TEMPLATE.md` §1, Worker/root deploy boundary).
 
 ### 2.2 `BRAND_SALE_ROUNDING` — 1 haléř, oba enginy počítají brandSale jinak
 
@@ -135,9 +135,9 @@ Projeví se jen na tierech ZR4–ZR14; od ZR16 výš loyalty přebije brandSale,
 Okfish se sám se sebou shoduje na **99,9845 %**. Zbývající rozdíly nejsou náhodné —
 obě třídy jsou **plně vysvětlené, reprodukovatelné a ručně přepočítané**. `UNCLASSIFIED = 0`.
 
-Podle §4.6 návrhu je P3 podmínkou startu P1/P2: **splněno v tom smyslu, že baseline je změřená
-a vysvětlená**, ale `ALLOW_LOYALTY_DIVERGENCE` je otevřený produkční nález, který by se měl
-opravit v okfishi bez ohledu na to, jestli k migraci vůbec dojde.
+Podle §4.6 návrhu je P3 podmínkou startu P1/P2: **splněno.** Baseline je změřená, vysvětlená,
+a žádná z tříd není otevřený nález — `LAYER_BADGE_VS_PRICELIST` je očekávaný rozdíl mezi
+vrstvami, `BRAND_SALE_ROUNDING` je haléřová odchylka v syntéze brandSale.
 
 ---
 
