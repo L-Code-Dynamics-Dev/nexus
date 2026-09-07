@@ -338,3 +338,79 @@ p3-okfish-selfcheck.ts,p2-nexus-vs-okfish.ts}`, testy `tests/regression/shadow/s
 
 Testy po tomto běhu: **864/864 zelených** (3× po sobě, žádná flakiness). Z toho 26 nových
 testů harnessu; zbytek beze změny.
+
+---
+
+## 6. DRUHÝ BĚH — proti čerstvému produkčnímu snapshotu (7.9. 12:16)
+
+Lucky dodal **plný Shoptet export ceníků** (`products (3).csv`, 54 MB) — přesně
+ten čerstvý snapshot, jehož absence blokovala ověření clearance oken
+a `PRODUCT_LIMITS`.
+
+**Co snapshot obsahuje:** 17 448 produktů, **10 ceníků** (pricelist 2/5/8/11/14/
+17/20/23/26/29 = ZR4–ZR25), 190 cenových sloupců, a hlavně `manufacturer`,
+`maxDiscount`, `applyLoyaltyDiscount` a `applyDiscountCoupon` — jak globálně,
+tak per pricelist.
+
+Kontrola na 93683 (Čelovka DELPHIN Compact) sedí se screenshotem z administrace
+na cent:
+
+| Pricelist | Tier | Cena | maxDiscount | kupón |
+|---|---|---|---|---|
+| 2–17 | ZR4–ZR14 | 12,71 | 5 | ✅ |
+| 20 | ZR16 | 12,56 | 5 | ✅ |
+| 23 | ZR18 | 12,26 | 5 | ✅ |
+| 26 | ZR20 | 11,96 | **0** | **❌** |
+| 29 | ZR25 | 11,21 | **0** | **❌** |
+
+`manufacturer: DELPHIN`, `applyLoyaltyDiscount: 0`. Vypnutý kupón u ZR20/ZR25
+odpovídá `coupon-policy.json` `lockedTiers`.
+
+### 6.1 P3 proti snapshotu — beze změny
+
+```
+produktů: 16758, porovnání: 167580, shoda: 167554 (99.9845 %)
+rozdílů: 26, dotčených produktů: 4, doba: 7,0 s
+breakdown: { BRAND_SALE_ROUNDING: 12, LAYER_BADGE_VS_PRICELIST: 14 }
+```
+
+Identické s prvním během. Obě třídy jsou **očekávané**, `UNCLASSIFIED = 0`.
+
+### 6.2 P2 proti snapshotu — TOHLE JE TA CHYBĚJÍCÍ ČÁST
+
+```
+--- naive (NEXUS bez PRODUCT_LIMITS) ---
+shoda: 165345 / 167580 (98.6663 %), rozdílů 2235, produktů 251
+breakdown: { LIMIT_SOURCE: 2071, BRAND_SALE_MISSING: 164 }
+
+--- with-limits (NEXUS dostal složené PRODUCT_LIMITS) ---
+shoda: 167416 / 167580 (99.9021 %), rozdílů 164, produktů 35
+breakdown: { BRAND_SALE_MISSING: 164 }
+
+--- adapted (kontrola poctivosti) ---
+shoda: 167580 / 167580 (100.0000 %), rozdílů 0
+```
+
+**Co je tím poprvé doložené:**
+
+1. **Clearance okna a `PRODUCT_LIMITS` jsou ověřené proti REÁLNÉMU VÝSTUPU**,
+   ne jen proti zdrojáku okfishe. To byla otevřená mezera z nočního běhu —
+   tehdejší snapshot vznikl před zavedením těch tří JSON souborů.
+2. **Brandová logika je ověřená proti produkčním datům.** Předchozí CSV
+   neobsahovala `manufacturer`, takže se dala ověřit jen proti oracle.
+   Tenhle sloupec má.
+3. **`adapted` = 100,0000 % na 167 580 kombinacích.** NEXUS s doplněnou
+   logikou počítá naprosto shodně s okfish root enginem. Kdyby v chainu byl
+   jakýkoli neznámý bug, tohle číslo by nevyšlo.
+
+**Zbývající 164 rozdílů** v režimu `with-limits` je `BRAND_SALE_MISSING` na
+35 produktech (DELPHIN, MIKADO, MIVARDI) — chybějící `brandSaleDiscounts`
+v chainu. Rules pro to existují (`BrandSaleDiscountRule`), jen nejsou zapojené
+v `createNexusPricingCalculator`. Zapojení mění ceny, takže je to rozhodnutí
+Luckyho, ne moje.
+
+**Reprodukce:**
+```
+tools/shadow/run.sh p3 --feed <export.csv> --out p3.json
+tools/shadow/run.sh p2 --feed <export.csv> --out p2.json
+```
