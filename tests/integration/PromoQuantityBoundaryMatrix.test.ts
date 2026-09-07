@@ -24,6 +24,8 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import Decimal from 'decimal.js';
 import { createNexusPricingCalculator } from '../../domains/pricing/createNexusPricingCalculator.js';
+import { FsPricingConfigurationProvider } from '../../connectors/pricing-engine/FsPricingConfigurationProvider.js';
+import type { TenantContext } from '../../core/tenant/types.js';
 import { PromoGroupDiscountRule } from '../../domains/campaign/PromoGroupDiscountRule.js';
 import { QuantityTierRule } from '../../domains/pricing/QuantityTierRule.js';
 import { XPlusXRule } from '../../domains/pricing/XPlusXRule.js';
@@ -35,6 +37,10 @@ import type { QuantityTierBreakpoint } from '../../core/canonical/entities/Price
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const POLICY_CONFIG_PATH = path.join(__dirname, '../../connectors/pricing-engine/legacy/config/policies/policy-v1.json');
+
+/** Tenant i konfigurace přicházejí do pricingu zvenku (P0 2026-09-07). */
+const TEST_TENANT: TenantContext = { tenantId: 'ten_okfish', platform: 'shoptet' };
+const CONFIG_PROVIDER = new FsPricingConfigurationProvider(POLICY_CONFIG_PATH);
 const ctx = { tenantId: 'ten_1', ruleId: 'test', ruleVersion: '1' };
 const now = '2026-09-05T00:00:00Z';
 
@@ -75,7 +81,7 @@ function computeFinalPrice(params: {
     quantityBreakpoints?: readonly QuantityTierBreakpoint[];
     totalQuantity?: number;
 }) {
-    const calculator = createNexusPricingCalculator(POLICY_CONFIG_PATH);
+    const calculator = createNexusPricingCalculator(CONFIG_PROVIDER, TEST_TENANT);
     const pricingResult = calculator(params.calculatorInput);
     const currentPrice = pricingResult.finalPrice; // POZOR: toto je PO rounding v legacy calculatoru,
     // ale pro test účely bereme jako "currentPrice" krok před promo/quantity vrstvou --

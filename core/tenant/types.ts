@@ -135,6 +135,70 @@ export interface TenantContext {
     readonly platform: string;
 }
 
+/**
+ * Guard proti návratu hardcoded tenanta (P0 rozhodnutí 2026-09-07:
+ * "Pricing musí dostávat TenantContext zvenku. Nikdy
+ * `const ctx = { tenantId: 'ten_1' }`").
+ *
+ * PROČ ASSERT A NE BRANDED TYPE: zvažován byl i `TenantId` jako branded
+ * type (`string & { readonly __brand: 'TenantId' }`), který by hodnotu
+ * z holého stringu nedovolil vyrobit bez explicitní konverze. Zamítnuto:
+ * `TenantId` je reexportován z `core/canonical/entities/base.ts` a nese ho
+ * `CanonicalEntity`, tedy KAŽDÁ entita v modelu plus všechny fixtures
+ * a testovací data. Brandování by znamenalo dotknout se stovek míst včetně
+ * 754 zelených testů -- to je přesně ten druh plošné změny, kterou
+ * Non-Interference zakazuje na stabilním kódu, a chybu by to odhalilo jen
+ * tam, kde by autor konverzi nenapsal (a on ji napíše, protože ho na to
+ * compiler upozorní).
+ *
+ * Runtime assert chytá skutečný failure mode, který nás pálí: kontext
+ * vyrobený uvnitř modulu z konstanty nebo z prázdné/placeholder hodnoty.
+ * Ve spojení s POVINNÝM `TenantContext` parametrem v signatuře (volající
+ * ho MUSÍ dodat, compile-time) pokrývá obojí -- statickou i běhovou stranu.
+ *
+ * Odmítá i známé placeholder hodnoty: kdyby někdo hardcoded tenanta jen
+ * přesunul o patro výš, spadne to tady, ne až v produkci na promíchaných
+ * cenách mezi e-shopy.
+ */
+const PLACEHOLDER_TENANT_IDS: readonly string[] = [
+    'ten_1', 'tenant', 'tenant_1', 'test', 'default', 'todo', 'changeme', 'unknown',
+];
+
+export function assertTenantContext(
+    context: TenantContext | null | undefined,
+    callSite: string
+): asserts context is TenantContext {
+    if (context === null || context === undefined) {
+        throw new TypeError(
+            `${callSite}: TenantContext is required and must be passed in from the caller. ` +
+            `Never construct it inline (e.g. \`{ tenantId: 'ten_1' }\`) -- tenant isolation ` +
+            `is a security invariant (CANONICAL-MODEL-CONTRACT.md §5).`
+        );
+    }
+
+    const { tenantId, platform } = context;
+
+    if (typeof tenantId !== 'string' || tenantId.trim() === '') {
+        throw new TypeError(
+            `${callSite}: TenantContext.tenantId must be a non-empty string, got ${JSON.stringify(tenantId)}.`
+        );
+    }
+
+    if (typeof platform !== 'string' || platform.trim() === '') {
+        throw new TypeError(
+            `${callSite}: TenantContext.platform must be a non-empty string, got ${JSON.stringify(platform)}.`
+        );
+    }
+
+    if (PLACEHOLDER_TENANT_IDS.includes(tenantId.trim().toLowerCase())) {
+        throw new TypeError(
+            `${callSite}: TenantContext.tenantId "${tenantId}" is a hardcoded placeholder. ` +
+            `Resolve the real tenant from the request/installation context instead -- ` +
+            `a placeholder tenant in a multi-tenant deployment mixes data between e-shops.`
+        );
+    }
+}
+
 /** Porušení tenant izolace je bezpečnostní incident, ne běžná chyba. */
 export class TenantIsolationViolation extends Error {
     constructor(

@@ -4,12 +4,17 @@ import { fileURLToPath } from 'url';
 import Decimal from 'decimal.js';
 import { PricingAdapter, type LegacyPricingInput, type LegacyPricingResult } from '../../domains/pricing/PricingAdapter.js';
 import { createNexusPricingCalculator } from '../../domains/pricing/createNexusPricingCalculator.js';
+import { FsPricingConfigurationProvider } from '../../connectors/pricing-engine/FsPricingConfigurationProvider.js';
+import type { TenantContext } from '../../core/tenant/types.js';
 import { isConfirmedSuccess, type Execution } from '../../core/canonical/lifecycle/Execution.js';
 import { aggregateBatchStatus, type ReconciliationItemResult } from '../../core/canonical/reconciliation/Reconciliation.js';
 import type { PricingComputationInput } from '../../core/canonical/entities/Price.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const POLICY_CONFIG_PATH = path.join(__dirname, '../../connectors/pricing-engine/legacy/config/policies/policy-v1.json');
+
+/** Tenant se do pricingu předává zvenku (P0 2026-09-07) -- test ho dodává stejně jako produkční volající. */
+const TEST_TENANT: TenantContext = { tenantId: 'ten_okfish', platform: 'shoptet' };
 
 /**
  * End-to-end test: SKU 93682, base 14.94, loyalty tier ZR20 (20%), product
@@ -40,7 +45,10 @@ describe('Pricing end-to-end — SKU 93682 (Nexus Rule chain)', () => {
     let nexusCalculatePrice: (input: LegacyPricingInput) => LegacyPricingResult;
 
     beforeAll(() => {
-        nexusCalculatePrice = createNexusPricingCalculator(POLICY_CONFIG_PATH);
+        nexusCalculatePrice = createNexusPricingCalculator(
+            new FsPricingConfigurationProvider(POLICY_CONFIG_PATH),
+            TEST_TENANT
+        );
     });
 
     it('full path: Canonical Input -> PricingAdapter -> Nexus Rule Chain -> Decision -> Validation -> Execution -> Reconciliation -> Outcome', () => {

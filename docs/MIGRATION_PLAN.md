@@ -5,23 +5,70 @@ Postup pro každý modul (per master prompt bod 47):
 
 Dokud nový modul nedosahuje parity se starým, **starý zůstává referenční a produkční** (bod 47). Nic se nevypíná předčasně.
 
+---
+
+## ZÁVAZNÉ POŘADÍ PRACÍ (rozhodnutí Lucky, 2026-09-07)
+
+**NEXUS se nerozšiřuje do dalších domén.** Nejdřív se uzavře řetěz
+`Canonical → Tenant → Domain → Connector → Execution → Audit → Reconciliation`.
+Toto pořadí má přednost před jakýmkoli fázováním níže. Fáze 1–6.5 popisují, co už vzniklo; P0/P1/P2 popisuje, co se dělá teď.
+
+### P0 — sjednocení architektury (běží)
+
+| # | Úkol | Stav |
+|---|---|---|
+| 1 | Duplicitní `CanonicalEntity`/`TenantId`/`EntityId` — jeden zdroj pravdy v `core/canonical/entities/base.ts` | **HOTOVO** (commit `ebdb2fd`) |
+| 2 | Zrušit hardcoded `tenantId: 'ten_1'` (`domains/pricing/createNexusPricingCalculator.ts:62`) — `TenantContext` přichází zvenku | otevřené |
+| 3 | `PricingConfigurationProvider` — pricing NESMÍ číst filesystem (`fs.readFileSync` na `policy-v1.json`, tamtéž ř. 56); ve Workeru to nikdy nepoběží | otevřené |
+| 4 | README odpovídající realitě | **HOTOVO** (2026-09-07) |
+| 5 | Migration Plan odpovídající realitě | **HOTOVO** (2026-09-07, tento dokument) |
+
+### P1 — NEXUS Runtime: jednotná execution pipeline
+
+Dnes žádná jednotná pipeline neexistuje. Rules se volají ad hoc, Worker route volá Store přímo, Execution/Reconciliation existují jako typy v `core/`, ale nic jimi neprotéká. P1 to sjednocuje:
+
+```
+Request → TenantContext → Canonical Input → Validation → Domain Rule Engine
+→ Decision → Execution Plan → Connector → Expected State → External Write
+→ Actual State → Reconciliation → Outcome → Audit
+```
+
+Nová vrstva **Execution Intent** mezi `Decision` a `Connector`: rozhodnutí domény se nepřekládá rovnou na volání konektoru, ale na zaznamenatelný, idempotentní záměr, který teprve konektor provádí. Bez ní nejde odlišit "nerozhodli jsme se to udělat" od "rozhodli, ale zápis selhal".
+
+### P2 — migrace domén, v tomto pořadí
+
+`Core → Pricing → SafeOrder → Availability → Procurement → Shoptet Connector → ERP Connector → Voucher → Campaign → Invoice → Billing`
+
+Doména se považuje za zmigrovanou, teprve když protéká celou P1 pipeline, ne když má Rules a testy.
+
+### Voucher Fáze B — ČEKÁ (rozhodnutí Lucky)
+
+Fáze A je hotová (D1 migrace, Rules, Store, Worker API, DO, CI zelené 19/19). **Fáze B se nezačíná, dokud není hotové P0 a P1.** Konkrétně se teď nedělá: Shoptet injector, validace instalace v UI, ostrý provoz u klienta.
+
+---
+
 ## Fázování (odpovídá bodu 49, s realistickým rozsahem "ne roky, ale ne jeden týden")
 
 ### Fáze 0 — Infrastruktura (kroky 49.1–49.11)
-Musí být hotovo dřív, než začne přenos jakékoli domény — jinak se pricing/safeorder/etc. staví na písku.
 
-| Krok | Modul | Zdroj vzoru |
+**Stav: kostra hotová, běhové vrstvy z velké části otevřené.** Původní věta "Fáze 0 rozjeto, žádná doména neobsahuje přenesenou business logiku" už neplatí — entity existují, Rules existují, 754 node testů je zelených. Neplatí ani opak: existence typu v `core/` neznamená, že jím něco protéká.
+
+| Krok | Modul | Stav k 2026-09-07 |
 |---|---|---|
-| Canonical Model | `core/canonical/` | Nová abstrakce (žádný zdroj to nemá hotové) — viz ARCHITECTURE_MAP.md kritický nesoulad |
-| Tenant Core | `core/tenant/` | AIE `TenantConfig` + SafeOrder `tenants`/`tenant_policies` tabulky |
-| Validation Framework | `core/validation/` | Pricing Engine 5-stage model (`CORE_LOGIC_AND_VALIDATION.md`) + SafeOrder 5-stage pipeline + Omega Gate 1-5 — tři nezávislé implementace téhož, sjednotit do jedné |
-| State Machine Framework | `core/state-machine/` | Omega `SyncJob`/`JobState` (nejexplicitnější) + AIE `PurchaseOrder` status enum |
-| Audit | `core/audit/` | Omega hash triáda (source/canonical/target payload) + AIE `procurement_audit_log` (JSONB append-only) |
-| Reconciliation | `core/reconciliation/` | Pricing Stage 5 (`reconcile-pricelist-drift.ts`, `reconcile-coupon-drift.ts`) — jediný zdroj s živě ověřenou reconciliation logikou |
-| Error Isolation | `core/error-isolation/` | Nová abstrakce — inspirace: Pricing `PricelistWriter.processDiff()` per-item `successfulDiffs`/`failedCodesInChunk` vzor |
-| Snapshot/Rollback | `core/snapshot/` | Pricing `.snapshots/` konvence — **POZOR**: aktuální implementace v okfish je fingovaná (píše na efemérní CI disk, viz `project_okfish_pricing_engine_inc012` paměť) — NEXUS verze musí řešit správně (R2/perzistentní storage) od začátku, ne opakovat stejnou chybu |
-| Idempotency | `core/idempotency/` | AIE `procurement_idempotency_keys` claim/complete pattern — nejzralejší implementace ze všech zdrojů |
-| Connector Layer (kostra) | `connectors/` | `pricing-engine-platform`'s `EcommercePlatformAdapter` (adaptér nikdy nepočítá byznys logiku, jen překládá data) — architektonicky nejčistší vzor v celém portfoliu |
+| Canonical Model | `core/canonical/` | **HOTOVO** — 17 souborů / 1 520 ř., `base.ts` je po `ebdb2fd` jediný zdroj pravdy pro `CanonicalEntity`/`TenantId`/`EntityId` |
+| Tenant Core | `core/tenant/` | Typy a `TenantConfig` hotové (171 ř.), ale **TenantContext se nikam nepředává** — pricing má hardcoded `'ten_1'` (P0.2) |
+| Validation Framework | `core/validation/` | Kostra (66 ř.) + testy. Není zapojený do jednotné pipeline (P1) |
+| State Machine Framework | `core/state-machine/` | **HOTOVO** — `evaluateTransition()` používají všechny lifecycle Rules (105 ř.) |
+| Audit | `core/audit/` | Typy + testy (159 ř.). Reálný audit zápis existuje jen pro voucher (`migrations/0002_voucher_audit.sql`) |
+| Reconciliation | `core/reconciliation/` | Generic reconciliation (164 ř.) + testy. **Neběží proti žádnému externímu systému** |
+| Error Isolation | `core/error-isolation/` | **HOTOVO** (133 ř.) — `PARTIAL_SUCCESS` vzor |
+| Snapshot/Rollback | `core/snapshot/` | Kostra (172 ř.). **Žádné perzistentní úložiště** — R2/D1 backend nenapsán, takže dnes je to stejná past jako fingovaný snapshot v okfish, jen bez falešného pocitu bezpečí |
+| Idempotency | `core/idempotency/` | **HOTOVO** (140 ř.) — claim/complete, in-memory store |
+| Connector Layer (kostra) | `connectors/` | **Kontrakt bez implementace.** `grep "implements Connector"` = 0 výsledků. 79 z 83 souborů v `connectors/` je 1:1 legacy port (5 963 ř.), volaný přímo, ne přes rozhraní. `erp-generic/` a `custom/` jsou prázdné adresáře |
+| **Perzistence** | `migrations/`, `connectors/d1/` | **Nový krok, přidán 2026-09-06.** Existuje jen pro voucher — viz Fáze A níže |
+| **Runtime** | `workers/`, `wrangler.jsonc` | **Nový krok, přidán 2026-09-06.** Existuje jen pro voucher. `database_id` jsou stále placeholdery, **nikdy se nedeploylo** |
+
+> **Čtenáři pozor:** čísla testů uvedená u jednotlivých fází níže (466/466, 527/527, … 644/644) jsou **historický záznam ke dni dané fáze**, ne aktuální stav. Aktuální stav k 2026-09-07: **754/754 node testů (61 souborů) + 19/19 Workers/D1 testů na CI**, `npx tsc --noEmit` čistý. Aktuální měření je vždy v `README.md`.
 
 ### Fáze 1 — První doménový modul: Pricing
 Vybráno jako první proto, že má nejvyšší produkční zralost (1361 commitů, 11 zdokumentovaných incidentů, golden-dataset testy) — pokud fáze 0 infrastruktura neobstojí proti tomuhle nejnáročnějšímu modulu, neobstojí proti ničemu.
@@ -31,8 +78,14 @@ Vybráno jako první proto, že má nejvyšší produkční zralost (1361 commit
 - **Zachovat beze změny**: `HighestDiscountPolicy`, `DiscountLimitPolicy` (Product→Brand→Category fallback), `RoundingPolicy`, command pattern (`SetPriceCommand`/`WarningCommand`/`RejectCommand`), golden-dataset testy
 - **`VoucherCouponPolicy` (VOUCHER vs COUPON distinkce) — HOTOVO** (2026-09-05): přeneseno z `~/Desktop/L-Code Pricing Engine(API)doplnek Shoptet/src/core/policies/VoucherCouponPolicy.ts` do `connectors/pricing-engine/legacy/voucher/VoucherCouponPolicy.ts` (1:1 legacy port) + `domains/pricing/VoucherCouponRule.ts` (Rule contract obal) + `tests/regression/golden-pricing/voucher-coupon-rule-parity.test.ts` (7/7 zelených). Stejně jako `CouponPolicyRule`, záměrně NENÍ napojeno do `createNexusPricingCalculator` — samostatná eligibility vrstva.
 - **`DiscountLimitPolicy` fix z pricing-engine-platform — NEMIGROVAT** (ověřeno 2026-09-05 přímo na GitHub `origin/main` okfish-pricing-engine): živý produkční okfish má STÁLE starou VAGNER logiku (`salePrice` vyhrává bezpodmínečně, i když je mělčí než cap-floor) — platform fix (`salePrice` vyhrává jen když je hlubší než cap) nikdy nebyl nasazen do produkce, je to nepotvrzený experiment na jiné větvi. Nexus `DiscountLimitRule.ts` dnes odpovídá 1:1 ověřené produkční logice — to je správná parita, ne zaostávání. Než se cokoli mění, je potřeba u Jose/Lucky potvrdit, jestli má platform fix vůbec jít do produkce.
-- **REGRESSION TEST**: portovat celou golden-dataset sadu (`tests/golden.test.ts` + fixtures) beze změny výsledků
-- **RECONCILIATION**: nový modul musí projít stejnou reconciliation logikou jako `reconcile-pricelist-drift.ts`, srovnáno proti živému okfish výstupu na identickém vstupu
+- **REGRESSION TEST**: portovat celou golden-dataset sadu (`tests/golden.test.ts` + fixtures) beze změny výsledků — **HOTOVO**, `tests/regression/golden-pricing/` (12 test souborů + 7 fixture scénářů × 10 ZR tierů)
+- **RECONCILIATION**: nový modul musí projít stejnou reconciliation logikou jako `reconcile-pricelist-drift.ts`, srovnáno proti živému okfish výstupu na identickém vstupu — **NEHOTOVO**, `core/reconciliation/` neběží proti žádnému externímu systému
+
+**Stav Fáze 1 k 2026-09-07: Rules hotové (12 souborů / 768 ř.), parity ověřená testy, ale modul NENÍ použitelný v produkci.** Dva P0 blokátory sedí přímo tady, v `domains/pricing/createNexusPricingCalculator.ts`:
+- ř. 62 — hardcoded `tenantId: 'ten_1'` (P0.2). Porušuje "tenant-scoped od prvního řádku"; `TenantContext` musí přijít zvenku.
+- ř. 56 — `fs.readFileSync(configPath)` na `policy-v1.json` (P0.3). Ve Workeru filesystem není; nutný `PricingConfigurationProvider`.
+
+Dokud tyhle dva nepadnou, pricing nemůže projít P1 pipeline ani se dostat do Workeru. V P2 pořadí je Pricing druhý, hned po Core.
 
 ### Fáze 2 — SafeOrder (Risk)
 - **OLD**: `~/safeorder-3.0/src/core/{risk-engine,risk-graph,calibration,economics,policy-engine}/`
@@ -52,6 +105,7 @@ Vybráno jako první proto, že má nejvyšší produkční zralost (1361 commit
 - **OLD**: Omega CSV parser (`~/omega-bridge/src/adapters/shoptet-file/`) + AIE `NoApiCsvAdapter`
 - **PŘEHODNOCENO 2026-09-05** — původní věta "3 nezávislé Shoptet CSV parsery, sjednotit do jednoho" byla nepřesná: `connectors/shoptet/legacy/cart/golias.js` (GOLIÁŠ) je nativní košík/DOM add-to-cart adapter, ŽÁDNÝ CSV parser vůbec — nepatří do tohoto bodu. Zbylé dva (`connectors/shoptet/legacy/csv/` pro OBJEDNÁVKY, schema-driven s validation gates; `connectors/supplier-csv/legacy/NoApiCsvAdapter.ts` pro DODAVATELE, poziční `split(',')`) parsují zcela odlišná schémata dat (jiné sloupce, jiný delimiter, jiná doména) — sloučení do jednoho parseru by bylo věcně špatně. **Není co migrovat/sjednocovat** — obě zůstávají oddělené, správně specializované na svou doménu dat. Pokud se v budoucnu ukáže potřeba sdíleného delimiter/row-parsing kódu, jde o extrakci společné utility (core/), ne sloučení business logiky.
 - Bod 41 zadání: musí fungovat bez API. Toto je blokující předpoklad pro Fázi 1-3 reálného nasazení (ne jen testů)
+- **Stav k 2026-09-07: NEZAČATO jako connector.** `connectors/shoptet/legacy/` obsahuje 6 souborů / 486 ř. legacy portu (CSV objednávky + `golias.js`), ale žádná třída neimplementuje `Connector.ts` — `grep "implements Connector"` vrací nula výsledků v celém repu. V P2 pořadí je Shoptet Connector až na 6. místě.
 
 ### Fáze 5 — Omega/ERP adapter
 - **OLD**: `~/omega-bridge/src/adapters/targets/omega/{OmegaMapper,OmegaAdapter}.ts`
@@ -151,7 +205,53 @@ Testovací matice záměrně používá existující `policy-v1.json`/ZR tier ko
 
 **UNRESOLVED** (Jose nezadal, NEIMPLEMENTOVÁNO): tie-break při shodné `priority` dvou+ Creative ve stejném placementu (řazení je jen stabilní/deterministické, ne odsouhlasený algoritmus jako u PromoGroup createdAt/id); přesný vztah "odpovídá kategorie" v resolve řetězci (Product má `categoryId`, ale PromoGroup nemá vazbu na kategorii vůbec, jen na `productIds` — Rule řeší jen produkt-přes-PromoGroup scope).
 
-**Zbývající Domain Rules (Fáze 6.5 pokračování, JEDNA doména najednou, podle Josova pořadí):** B2B (obchodní pravidla firemních zákazníků) → Invoice/Omega (skutečný dokladový workflow) → Warehouse (skutečná skladová logika) → Billing/Subscription (skutečný SaaS billing). Každá čeká na explicitní business zadání od Jose před implementací — žádné domýšlení.
+**Zbývající Domain Rules (Fáze 6.5 pokračování, JEDNA doména najednou, podle Josova pořadí):** B2B (obchodní pravidla firemních zákazníků) → Invoice/Omega (skutečný dokladový workflow) → Warehouse (skutečná skladová logika) → Billing/Subscription (skutečný SaaS billing).
+
+**POZASTAVENO 2026-09-07 (Lucky).** Fáze 6.5 se dál nerozšiřuje. Další domény přijdou na řadu až v P2, a to až po dokončení P0 a P1 — nemá smysl přidávat business rules k doménám, které neprotékají žádnou execution pipeline.
+
+---
+
+### Fáze A — Digital Voucher: první perzistence a runtime v NEXUSu (2026-09-06 až 07) — HOTOVO
+
+Tohle je zlom, který v tomto plánu do teď nebyl zapsaný. **Do 6. 9. 2026 byl NEXUS knihovna business logiky bez runtime** — entity, Rules, testy, ale žádná databáze, žádný proces, žádný deployment. Voucher Fáze A poprvé přidala běhovou vrstvu:
+
+| Co vzniklo | Kde |
+|---|---|
+| První D1 migrace | `migrations/0001_credit_voucher.sql` (peníze INTEGER v haléřích, `version` sloupec, partial unique index, CHECK `current_balance >= 0`), `migrations/0002_voucher_audit.sql` |
+| První Worker config | `wrangler.jsonc` — dev + `env.production` s fyzicky oddělenou databází, D1 binding `DB`, DO binding `VOUCHER_SECURITY`, `new_sqlite_classes` |
+| První HTTP entry point | `workers/api/` — `index.ts`, `hmac.ts`, `http.ts`, `types.ts`, `SecurityCoordinator.ts`, `routes/voucher.ts`, `routes/issuance.ts` |
+| První Durable Object | `SecurityCoordinator` — nonce (replay protection §6.2) + rate limit (§4) |
+| První perzistentní store | `connectors/d1/D1CreditVoucherStore.ts` + `moneyMapper.ts` (1 210 ř.) — jediný nativní konektor v repu |
+| Doménová logika | `domains/voucher/` — `CreditVoucherValidityRule`, `RedemptionRule`, `LifecycleRule`, `Store`, `CodeGenerator` (5 souborů / 1 462 ř.) |
+| Entita | `core/canonical/entities/CreditVoucher.ts` |
+| První CI | `.github/workflows/test.yml` — joby `node` a `workers`, oba `ubuntu-latest` |
+
+Commity: `d6eecc8` → `93eb4b1` → `ca70a5b` → `8b70c3e` → `01d842b`.
+
+**Klíčový nález, prokázaný během na reálné D1 (ne odvozený z dokumentace):** D1 `batch()` se rollbackuje jen při SQL chybě. `UPDATE ... WHERE version = ?`, který nematchne žádný řádek, chybou není — batch projde, `success: true` u obou statementů, zůstatek se nezmění a transakce o čerpání se **zapíše**. Naivní `db.batch([UPDATE, INSERT])` by znamenal voucher k utracení donekonečna, a hůř: zabraný unique index by způsobil, že retry vyhodnotí situaci jako idempotentní replay a vrátí `consumed: true`. Opraveno v `ca70a5b` (nejdřív UPDATE, ověřit `meta.changes === 1`, teprve pak INSERT).
+
+**Status atomického čerpání: OVĚŘENO** — `tests/workers/schema.test.ts` 19/19 zelených na CI proti reálné D1.
+
+**Co Fáze A NEMÁ:** nasazení. `database_id` a `preview_database_id` ve `wrangler.jsonc` jsou pořád placeholdery `<vyplnit-po-wrangler-d1-create>`, databáze `nexus-voucher-dev` ani `nexus-voucher` fyzicky neexistují. Runtime je napsaný a otestovaný, ne provozovaný.
+
+**Známý blokátor:** Workers/D1 testy nejdou spustit na vývojovém stroji — workerd vyžaduje macOS 13.5+, Mac Mini 2014 jede 12.7.6. Hardwarový strop, ne konfigurace. Jediné ověření je CI job na Ubuntu.
+
+**Fáze B ČEKÁ** (Lucky, 2026-09-07) — Shoptet injector, validace instalace v UI a ostrý provoz u klienta se nezačínají před dokončením P0 a P1.
+
+---
+
+### Design proposals — stav
+
+| Dokument | Stav |
+|---|---|
+| `docs/design-proposals/Digital-Voucher.md` | **v3, UZAVŘENO.** Všechna tři blokující rozhodnutí padla (Lucky): (a) atomicita = optimistický zámek se `version` sloupcem, DB je autorita, ne Durable Object; (b) cesta do košíku = kredit produkt `1 Kč × N ks` + kupón 100 % omezený na kategorii; (c) daňový režim = víceúčelový poukaz (MPV) dle § 15b ZDPH. Otevřený požadavek Lucky: naše UI musí instalaci validovat a průběžně kontrolovat (kredit produkt za 1 Kč, kategorie, omezení kupónu, nasazený JS) — bez toho nejde systém zapnout; v návrhu zatím nezapsáno. |
+| `docs/design-proposals/ERP-Generic-Layer.md` | **Návrh, neimplementováno.** `connectors/erp-generic/` je prázdný. Klíčové nálezy: Pohoda dedupuje server-side, Omega vůbec → slepý retry = duplicitní faktura; Omega nemá strojovou odpověď (úspěch se čte z logu regexem) → nutné `confirmationQuality: SYSTEM_CONFIRMED \| LOG_INFERRED`; `taxRate: number` nerozliší osvobozeno / mimo předmět / PDP (dotýká se MPV — "bez DPH" ≠ "0 %"); `cancel()` do rozhraní nepatří (storno je účetně nový doklad). Blokátor: `OmegaExecutor` neověřený proti reálnému Windows agentovi. |
+| `docs/design-proposals/Shoptet-Premium-Template.md` | **Návrh, neimplementováno.** Shoptet nemá editovatelné server-side šablony (žádný Twig), HTML nevlastníme. Blank template mode jen na Premium (~12 tis./měs) — blokuje škálovatelnost. Nativní konfigurace = 6 barev + 2 fonty. Konfigurátor generuje statický `theme.css` → SFTP na Shoptet CDN, produkce nikdy nevolá naši infrastrukturu. Dlaždice primárně čistým CSS, ne JS přeskládáním DOM. Odhad: MVP 12–15 týdnů, plný self-service 22–28 týdnů. |
+| `docs/design-proposals/Pricing-Shadow-Migration.md` | Návrh stínového běhu pricingu proti živému okfish. Neimplementováno — předpokládá P1 pipeline. |
+| `docs/design-proposals/QuantityTier-Hecmania.md` | Otevřeno, §6 nerozhodnut. `domains/pricing/QuantityTierRule.ts` je placeholder. |
+| `docs/design-proposals/Fase6-new-domains-status.md` | Stavový dokument k Fázi 6, překonaný sekcí P0/P1/P2 nahoře. |
+
+---
 
 ## Co explicitně NEPŘENÁŠET
 

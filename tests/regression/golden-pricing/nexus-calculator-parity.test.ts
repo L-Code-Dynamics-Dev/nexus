@@ -15,6 +15,8 @@ import Decimal from 'decimal.js';
 
 import { createLegacyPricingCalculator } from '../../../connectors/pricing-engine/createLegacyPricingCalculator.js';
 import { createNexusPricingCalculator } from '../../../domains/pricing/createNexusPricingCalculator.js';
+import { FsPricingConfigurationProvider } from '../../../connectors/pricing-engine/FsPricingConfigurationProvider.js';
+import type { TenantContext } from '../../../core/tenant/types.js';
 import type { LegacyPricingInput } from '../../../domains/pricing/PricingAdapter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,7 +25,14 @@ const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 
 describe('createNexusPricingCalculator parity vs createLegacyPricingCalculator (70 golden combinations)', () => {
     const legacyCalculate = createLegacyPricingCalculator(CONFIG_PATH);
-    const nexusCalculate = createNexusPricingCalculator(CONFIG_PATH);
+    // Setup-only změna (P0 2026-09-07): factory teď bere provider + tenant
+    // zvenku místo configPath. Stejný policy-v1.json, stejný chain, stejné
+    // asserce -- parita proti legacy se nemění.
+    const NEXUS_TENANT: TenantContext = { tenantId: 'ten_okfish', platform: 'shoptet' };
+    const nexusCalculate = createNexusPricingCalculator(
+        new FsPricingConfigurationProvider(CONFIG_PATH),
+        NEXUS_TENANT
+    );
 
     const tiers = ["ZR4", "ZR6", "ZR8", "ZR10", "ZR12", "ZR14", "ZR16", "ZR18", "ZR20", "ZR25"];
     const files = fs.readdirSync(FIXTURES_DIR).filter((f) => f.endsWith('.csv'));

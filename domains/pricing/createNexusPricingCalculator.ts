@@ -20,8 +20,10 @@
 // a logika je identická -- žádná nová business logika, jen produkční
 // zapojení už migrovaných Rules.
 //
-// configPath odpovídá stejnému policy-v1.json formátu jako legacy
-// EngineBuilder.fromConfig() -- žádná nová konfigurace.
+// Konfigurace odpovídá stejnému policy-v1.json formátu jako legacy
+// EngineBuilder.fromConfig() -- žádná nová konfigurace, jen jiná cesta,
+// kudy dovnitř přichází (PricingConfigurationProvider místo fs.readFileSync,
+// viz P0 poznámka u factory níže).
 //
 // customerTier guard: legacy engine má `CustomerTier` jako TypeScript union,
 // takže neplatný tier je compile-time chyba. Nexus PricingComputationInput
@@ -32,19 +34,14 @@
 // prostě nepoužije) místo aby explicitně selhal. Zachovává chování
 // createLegacyPricingCalculator.toCustomerTier().
 
-import * as fs from 'fs';
 import Decimal from 'decimal.js';
+import { assertTenantContext, type TenantContext } from '../../core/tenant/types.js';
 import type { LegacyPricingInput, LegacyPricingResult } from './PricingAdapter.js';
+import type { PricingConfigurationProvider } from './PricingConfigurationProvider.js';
 import { BasePriceRule } from './BasePriceRule.js';
 import { HighestDiscountRule } from './HighestDiscountRule.js';
 import { DiscountLimitRule } from './DiscountLimitRule.js';
 import { RoundingRule } from './RoundingRule.js';
-
-interface PolicyConfig {
-    loyaltyTiers: Record<string, number>;
-    brandLimits?: Record<string, number>;
-    categoryLimits?: Record<string, number>;
-}
 
 function toDecimalMap(m: Record<string, number> | undefined): Record<string, Decimal> {
     const out: Record<string, Decimal> = {};
@@ -52,14 +49,35 @@ function toDecimalMap(m: Record<string, number> | undefined): Record<string, Dec
     return out;
 }
 
-export function createNexusPricingCalculator(configPath: string): (input: LegacyPricingInput) => LegacyPricingResult {
-    const config: PolicyConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+/**
+ * P0 (2026-09-07) -- DVA vstupy, které se dřív vyráběly uvnitř, teď musí
+ * přijít zvenku:
+ *
+ *   1. `tenant: TenantContext` -- nahrazuje `const ctx = { tenantId: 'ten_1' }`.
+ *      Hardcoded tenant by v multi-tenant nasazení promíchal ceny mezi
+ *      e-shopy. `assertTenantContext` navíc placeholder hodnotu odmítne
+ *      i za běhu, kdyby ji někdo jen přesunul o patro výš.
+ *   2. `configProvider: PricingConfigurationProvider` -- nahrazuje
+ *      `fs.readFileSync(configPath)`. Doména už nezná filesystem, takže
+ *      pricing chain je nasaditelný do Cloudflare Workeru.
+ *
+ * Signatura je záměrně breaking: volající MUSÍ obojí dodat, jinak to
+ * neprojde překladem. Chain, pořadí Rules ani business logika se nemění --
+ * parita proti legacy zůstává ověřená stejnými golden testy.
+ */
+export function createNexusPricingCalculator(
+    configProvider: PricingConfigurationProvider,
+    tenant: TenantContext
+): (input: LegacyPricingInput) => LegacyPricingResult {
+    assertTenantContext(tenant, 'createNexusPricingCalculator');
+
+    const config = configProvider.getPolicyConfig(tenant);
     const loyaltyTiers = toDecimalMap(config.loyaltyTiers);
     const brandLimits = toDecimalMap(config.brandLimits);
     const categoryLimits = toDecimalMap(config.categoryLimits);
     const validTiers = Object.keys(config.loyaltyTiers);
 
-    const ctx = { tenantId: 'ten_1', ruleVersion: '1' };
+    const ctx = { tenantId: tenant.tenantId, ruleVersion: '1' };
     const basePriceRule = new BasePriceRule({ ...ctx, ruleId: 'base-price-v1' });
     const highestDiscountRule = new HighestDiscountRule({ ...ctx, ruleId: 'highest-discount-v1' });
     const discountLimitRule = new DiscountLimitRule({ ...ctx, ruleId: 'discount-limit-v1' });
