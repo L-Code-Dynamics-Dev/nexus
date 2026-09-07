@@ -89,12 +89,13 @@ Detaily: `docs/shadow-reports/MISSING-PRICING-LOGIC.md`
 ---
 
 
-## 2026-09-07 (noc) — P0 i P1 hotové, 948 testů
+## 2026-09-07 (noc) — P0 i P1 hotové, 957 testů
 
 Větev `chore/vitest-4-upgrade`, vše pushnuto, CI zelené.
 
 | Commit | Co |
 |---|---|
+| `2850c77` | integrační test pipeline — **odhalil vadu návrhu, opraveno** |
 | `c5c8996` | D1ExecutionIntentStore — produkční perzistence |
 | `7cb7237` | P1 IntentReconciliation — **řetěz uzavřen** |
 | `277af82` | **první implementace Connector kontraktu** (byla nula) |
