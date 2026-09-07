@@ -914,3 +914,48 @@ je vrátí. Bez Intentu by nedotažená objednávka zmizela beze stopy a chyběj
 §18.5) a mění stav. `AUDIT_VOUCHER_REDEMPTION` je **jen čtení a zápis
 do vlastní D1** -- do Shoptetu nezapisuje nic, takže ho `ReadOnlyGuard`
 nechá projít i na produkčním tokenu.
+
+### 18.8 Tvar `/api/orders` -- co je ověřené a co chybí (7.9.2026)
+
+Ověřeno produkčním tokenem, výhradně GET.
+
+**Seznam** `/api/orders` vrací zkrácené objednávky (bez položek):
+`code`, `guid`, `email`, `fullName`, `price`, `paid`, `status`,
+`paymentMethod`, `shipping`, `remark`, `creationTime`, `adminUrl`, …
+
+**Detail** `/api/orders/{code}` má navíc `items`, `billingAddress`,
+`deliveryAddress`, `shippings`, `paymentMethods`, `vatMode`, `vatPayer`.
+
+**KLÍČOVÉ: samostatný klíč `discounts` NEEXISTUJE.** Slevy jsou položkami
+v `items`, rozlišené polem **`itemType`**.
+
+Položka nese: `itemType`, `code`, `name`, `amount`, `itemPrice`,
+`unitPrice`, `itemPriceVatBreakdown`, `productGuid`, `brand`, `priceRatio`, …
+
+**Nalezené hodnoty `itemType`** (30 objednávek, 237 položek):
+
+| itemType | počet |
+|---|---|
+| `product` | 147 |
+| `shipping` | 30 |
+| `gift` | 30 |
+| `billing` | 30 |
+
+> **CO CHYBÍ: ani jedna z posledních 30 objednávek neuplatnila kupón.**
+> Hodnotu `itemType` pro slevový kupón tedy NEZNÁME -- pravděpodobně
+> `discount` nebo `coupon`, ale **je to odhad, ne ověřený fakt**.
+>
+> `sumOrderDiscountsMinor` v `ShoptetApiClient` proto dnes hledá klíč
+> `discounts` / `discount`, což podle téhle struktury **nikdy nenajde**.
+> Až bude tvar potvrzený, přepíše se na filtr přes `items[].itemType`.
+> Funkce vrací `recognised: false`, takže se místo nuly nezapíše nic --
+> chová se správně, jen neumí to, co ještě neví.
+
+**Jak tvar potvrdit** (jedna z cest, obojí jde bez zápisu):
+1. nechat proběhnout reálnou objednávku s uplatněným kupónem a přečíst
+   ji přes API, nebo
+2. projít starší objednávky (`/api/orders` stránkuje) a najít takovou,
+   kde kupón uplatněný byl -- 20% kupón u okfishe běží, takže existovat musí
+
+Do potvrzení zůstává §18.7 krok 4 (spárování voucheru a zápis
+`burned_unclaimed_minor`) nedokončený. Kroky 1-3 fungují.
