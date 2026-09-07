@@ -7,20 +7,30 @@
 // (Shoptet/Shopify) přímo — jen přes Tenant.platform jako string klíč do
 // Connector Layer (§15: "Core nesmí obsahovat if ERP === ...").
 
-// DRAFT-v1 canonical types byly archivovány (core/canonical/DRAFT-v1-types.ts.bak)
-// při zavedení core/canonical/CANONICAL-MODEL-CONTRACT.md — nová struktura
-// entities/rules/states/projections čeká na návrh dle kontraktu (viz TBD sekce).
-// Dočasně definováno lokálně, než vznikne core/canonical/entities/base.ts.
-export type TenantId = string;
-export type EntityId = string;
-export type ISODateTime = string;
+// P0 SJEDNOCENÍ (2026-09-07): typy se REEXPORTUJÍ z kanonického zdroje,
+// nedefinují se tady.
+//
+// Do dneška tu byla vlastní kopie `TenantId` / `EntityId` / `ISODateTime` /
+// `CanonicalEntity` s komentářem "dočasně definováno lokálně, než vznikne
+// core/canonical/entities/base.ts". Ten soubor mezitím vznikl, ale kopie
+// zůstala — takže repo mělo DVĚ definice téhož. Strukturálně byly shodné,
+// takže TypeScript nic nehlásil, ale:
+//   - autor nového kódu nevěděl, odkud importovat (a agenti sahali střídavě
+//     do obou míst),
+//   - kdyby se `base.ts` rozšířil (např. o `version` v `AuditableTimestamps`),
+//     rozešly by se tiše a chyba by se projevila až za běhu.
+//
+// Reexport, ne pouhé smazání: `core/tenant/types.ts` je veřejný vstupní bod
+// tenant vrstvy a osm souborů z něj importuje. Odstranění by je rozbilo bez
+// důvodu — cílem P0 je jeden ZDROJ pravdy, ne přesouvání importů.
+export type { TenantId, EntityId, ISODateTime, CanonicalEntity } from '../canonical/entities/base.js';
 
-export interface CanonicalEntity {
-    readonly id: EntityId;
-    readonly tenantId: TenantId;
-    readonly createdAt: ISODateTime;
-    readonly updatedAt: ISODateTime;
-}
+import type {
+    TenantId,
+    EntityId,
+    ISODateTime,
+    CanonicalEntity,
+} from '../canonical/entities/base.js';
 
 export type TenantStatus = 'ACTIVE' | 'SUSPENDED' | 'UNINSTALLED';
 export type PlanTier = 'STARTER' | 'GROWTH' | 'ENTERPRISE' | 'CUSTOM';
