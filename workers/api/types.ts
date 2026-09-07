@@ -169,6 +169,19 @@ export interface Env {
     /** Sdílené tajemství order webhooku (Shoptet -> NEXUS). */
     readonly WEBHOOK_SECRET?: string;
     /**
+     * Klíč, kterým Shoptet podepisuje těla webhooků (HMAC-SHA1).
+     * TÁŽ hodnota, jakou má okfish Worker jako
+     * `SHOPTET_WEBHOOK_SIGNING_KEY` -- podpis je nad tělem, takže
+     * přeposlání ho nemění a NEXUS ho musí ověřit stejným klíčem.
+     */
+    readonly SHOPTET_WEBHOOK_SIGNING_KEY?: string;
+    /**
+     * Sdílené tajemství mezi okfish Workerem a NEXUSem. Dokazuje, že
+     * payload přeposlal NÁŠ Worker, ne kdokoli, kdo zachytil platné tělo.
+     * Bez něj by samotný HMAC dovolil replay.
+     */
+    readonly NEXUS_FORWARD_TOKEN?: string;
+    /**
      * Délka platnosti poukazu v MĚSÍCÍCH (§8: default 12 = 1 rok, §11:
      * konfigurovatelné per tenant). Bez hodnoty se použije default 12.
      *

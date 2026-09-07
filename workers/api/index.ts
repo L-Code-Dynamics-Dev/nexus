@@ -20,6 +20,7 @@
 // pinovat a hlídat (master rule).
 
 import { ApiError, jsonError, log, preflightResponse, withCors } from './http.js';
+import { handleShoptetWebhook } from './routes/shoptetWebhook.js';
 import { handleIssue } from './routes/issuance.js';
 import { handleRedeem, handleValidate } from './routes/voucher.js';
 import type { Env } from './types.js';
@@ -34,8 +35,15 @@ import type { Env } from './types.js';
  */
 export { SecurityCoordinator } from './SecurityCoordinator.js';
 
+/** Minimální tvar Cloudflare `ExecutionContext` -- potřebujeme jen waitUntil. */
+interface ExecutionContextLike {
+    waitUntil(promise: Promise<unknown>): void;
+}
+
 export default {
-    async fetch(request: Request, env: Env): Promise<Response> {
+    // `ctx` je potřeba pro `ctx.waitUntil()` -- webhook musí odpovědět do
+    // 4 s (§16) a zpracování běží až po odeslání odpovědi.
+    async fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response> {
         const origin = request.headers.get('Origin');
         const requestId = crypto.randomUUID();
         const startedAt = Date.now();
@@ -51,7 +59,7 @@ export default {
         try {
             assertRequiredBindings(env);
 
-            const response = await route(request, env, url);
+            const response = await route(request, env, url, ctx);
 
             log('info', 'http.request', {
                 requestId,
@@ -97,7 +105,7 @@ export default {
     },
 };
 
-async function route(request: Request, env: Env, url: URL): Promise<Response> {
+async function route(request: Request, env: Env, url: URL, ctx: ExecutionContextLike): Promise<Response> {
     const path = url.pathname.replace(/\/+$/, '');
 
     switch (path) {
@@ -114,6 +122,13 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
         case '/api/vouchers/issue':
             requireMethod(request, 'POST');
             return handleIssue(request, env);
+
+        // Shoptet webhook -- PŘEPOSLANÝ z okfish Workeru, ne registrovaný
+        // přímo. Shoptet dovolí jen jednu URL na event a `order:create` už
+        // míří na okfish; přímá registrace by ho přepsala (§17.2 návrhu).
+        case '/api/webhooks/shoptet':
+            requireMethod(request, 'POST');
+            return handleShoptetWebhook(request, env, ctx);
 
         default:
             throw new ApiError('NOT_FOUND', 404, `Neznámý endpoint ${url.pathname}.`);
