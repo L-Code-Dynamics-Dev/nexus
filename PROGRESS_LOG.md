@@ -1,5 +1,43 @@
 # NEXUS — Progress Log
 
+## ⚠️ PRO LUCKYHO — PŘEČTI RÁNO JAKO PRVNÍ (7.9. noc)
+
+### Okfish se sám se sebou neshoduje. Týká se to živého e-shopu DNES.
+
+Nález je **nezávislý na migraci do NEXUSu** — je to stav produkce.
+
+**1,13 % katalogu má jinou cenu podle toho, který engine ji počítá.**
+Okfish má dva cenové enginy (worker pro badge, root/bridge pro batch ceníky).
+Worker `applyPercent` a bridge `Math.round(base*(1-ratio)*100)/100` se
+rozcházejí. Bridge nikdy nedostal float-fix, který worker má okomentovaný.
+
+- Změřeno na **49 899 dvojicích: 564 rozdílů**, každý o 1 cent
+- Zákazník tedy může vidět na badge jinou cenu, než jaká je v ceníku
+
+Další rozdíly mezi enginy:
+- `actionPrice = 0`: worker propustí, bridge zahodí (falsy hodnota)
+- `resolveClearancePct` míchá UTC (`validFrom`) a lokální čas (`validTo`)
+- clearance okno je **nedeterministické** — `new Date()` při načtení modulu
+
+**Co s tím:** NEXUS se přiklonil k workeru (doloženo na 2,1 mil. dvojicích,
+že Decimal ROUND_HALF_UP == integer-cents). Ale rozhodnutí, **který engine
+má pravdu**, je tvoje — a oprava toho druhého změní ceny.
+
+### Dvě věci k potvrzení
+
+1. **Strop 0 % se chová jako ŽÁDNÝ strop** — v obou enginech. Je to záměr,
+   nebo bug? Natolik neintuitivní, že to nechci považovat za správné bez
+   tvého slova.
+2. **Clearance okna a `PRODUCT_LIMITS` nejdou ověřit proti produkci** —
+   jediný snapshot vypočtených cen vznikl PŘED zavedením těch tří JSON
+   souborů (`112824` má dnes strop 0 %, ve snapshotu −24,9 %). Parita je
+   jen proti zdrojáku, ne proti reálnému výstupu.
+
+Detaily: `docs/shadow-reports/MISSING-PRICING-LOGIC.md`
+
+---
+
+
 ## 2026-09-07 — Fáze A HOTOVÁ, CI zelené, atomicita OVĚŘENA
 
 Repo: **https://github.com/hlancaric-ship-it/nexus** (privátní),
