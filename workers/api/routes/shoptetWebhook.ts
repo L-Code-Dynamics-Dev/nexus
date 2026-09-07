@@ -49,12 +49,35 @@ const FORWARD_TOKEN_HEADER = 'X-Nexus-Forward-Token';
 /** Události, které voucher doména zpracovává. Ostatní se tiše potvrdí. */
 const HANDLED_EVENTS: ReadonlySet<string> = new Set(['order:create', 'order:update']);
 
+/**
+ * Tvar payloadu -- POTVRZENO z oficiální dokumentace 7.9.2026
+ * (developers.shoptet.com/api/documentation/webhooks/).
+ *
+ * Payload je ZÁMĚRNĚ MINIMÁLNÍ. Neobsahuje NIC o zákazníkovi ani o zboží:
+ *
+ *   { "eshopId": 767740,
+ *     "event": "order:create",
+ *     "eventCreated": "2026-09-07T15:13:39+0200",
+ *     "eventInstance": "2026001620" }
+ *
+ * `eventInstance` je ČÍSLO OBJEDNÁVKY. Detaily se dotahují zvlášť přes
+ * `GET /api/orders/{eventInstance}`.
+ *
+ * DVA DŮSLEDKY:
+ * 1. Payload je z hlediska GDPR neškodný -- dá se logovat celý, nejsou
+ *    v něm osobní údaje. Osobní data přijdou až s dotažením objednávky.
+ * 2. Zpracování NUTNĚ potřebuje síťové volání na Shoptet API. Proto běží
+ *    v `ctx.waitUntil()` po odeslání odpovědi, ne uvnitř 4s limitu.
+ *
+ * Pozn.: u `product:*` událostí posílá okfish `sendPayload: "full"`, tam
+ * je tvar bohatší -- ale ty voucher doména nezpracovává.
+ */
 export interface ShoptetWebhookPayload {
     readonly event?: string;
     readonly eshopId?: number;
+    /** Číslo objednávky, např. "2026001620". NE interní ID. */
     readonly eventInstance?: string | number;
     readonly eventCreated?: string;
-    readonly data?: Record<string, unknown>;
 }
 
 export async function handleShoptetWebhook(
@@ -136,20 +159,48 @@ export async function handleShoptetWebhook(
 }
 
 /**
- * Zpracování objednávky. Dnes jen loguje -- napojení na issuance přijde,
- * až bude rozhodnuté přepojení na straně okfishe (§17.2).
+ * Zpracování objednávky.
  *
- * VĚDOMĚ NEDOKONČENO: dopsat sem volání issuance dřív, než je jasné, jak se
- * payload dostane až sem, by znamenalo psát proti nepotvrzenému tvaru dat.
+ * Běží AŽ PO odeslání odpovědi (`ctx.waitUntil`), protože payload nese jen
+ * číslo objednávky -- detaily se musí dotáhnout přes Shoptet API, a to je
+ * síťové volání, které se do 4s limitu spolehlivě nevejde.
+ *
+ * TOK:
+ *   1. z payloadu vzít `eventInstance` = číslo objednávky
+ *   2. `GET /api/orders/{číslo}` -- načíst položky a e-mail
+ *   3. zjistit, jestli objednávka obsahuje voucher produkt (N x 1 Kč)
+ *   4. pokud ano, vystavit poukaz (idempotentně na sourceOrderId)
+ *
+ * DNES JE HOTOVÝ KROK 1. Kroky 2-4 čekají na `SHOPTET_API_TOKEN` v Env
+ * a na potvrzení, který produktový kód je voucher (§1 návrhu -- produkt
+ * za 1 Kč, ale jeho konkrétní kód v okfish katalogu zatím nemáme).
+ *
+ * Chybějící kroky VĚDOMĚ nedopisuju naslepo: uhádnout kód voucher produktu
+ * by znamenalo, že se poukaz buď nikdy nevystaví, nebo se vystaví za
+ * něco jiného.
  */
 async function processOrderEvent(payload: ShoptetWebhookPayload, _env: Env): Promise<void> {
+    const orderNumber = payload.eventInstance;
+
+    if (orderNumber === undefined || orderNumber === '') {
+        // Payload bez čísla objednávky je pro nás k ničemu -- není co dotáhnout.
+        log('error', 'webhook.order_event.missing_instance', {
+            alert: true,
+            event: payload.event,
+        });
+        return;
+    }
+
     log('info', 'webhook.order_event', {
         event: payload.event,
-        eventInstance: payload.eventInstance,
-        // TODO(Fáze B): napojit na issuance -- načíst objednávku přes
-        // /api/orders/{code}, zjistit, jestli obsahuje voucher produkt
-        // (N x 1 Kč), a vystavit poukaz. Blokuje rozhodnutí o přepojení.
-        pending: 'issuance-not-wired',
+        // Číslo objednávky NENÍ osobní údaj -- payload jich žádné neobsahuje
+        // (viz komentář u ShoptetWebhookPayload), takže se loguje celé.
+        orderNumber: String(orderNumber),
+        eshopId: payload.eshopId,
+        // TODO(Fáze B, kroky 2-4): GET /api/orders/{orderNumber} -> najít
+        // voucher produkt -> vystavit poukaz. Chybí SHOPTET_API_TOKEN v Env
+        // a potvrzený kód voucher produktu.
+        pending: 'order-fetch-not-wired',
     });
 }
 
