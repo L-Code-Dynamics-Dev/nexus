@@ -74,6 +74,37 @@ Další rozdíly mezi enginy:
 že Decimal ROUND_HALF_UP == integer-cents). Ale rozhodnutí, **který engine
 má pravdu**, je tvoje — a oprava toho druhého změní ceny.
 
+### 🟠 112824 — konfigurace a Shoptet se rozcházejí (7.9., ověřeno screenshotem)
+
+Kód **112824 (Mletá káva FISH)** je v `src/config/policies/zero-discount-products.json`
+(206 položek) — okfish ho tedy považuje za produkt, který **nesmí dostat žádnou slevu**.
+
+Ale v Shoptet administraci má:
+
+| Tier | Max. sleva | Cena |
+|---|---|---|
+| ZR4 | 6 % | **9,50** |
+| ZR6 | 4 % | 9,31 |
+| ZR8 | 2 % | 9,11 |
+| ZR10–ZR25 | 0 % | 8,91 |
+
+Plus globálně **Maximální povolená sleva = 10 %**.
+
+Shadow běh to zachytil: base 9,90, okfish spočítal 9,90 (žádná sleva),
+NEXUS bez limitů 9,50. **V produkci je 9,50** — tedy hodnota, kterou dal NEXUS.
+
+**Otázka pro Luckyho:** má 112824 v `zero-discount-products.json` být, nebo
+se tam dostal omylem? Z kódu to nerozhodnu — je to obsah konfigurace, ne logika.
+
+- Pokud **má** být bez slevy → ceny v Shoptetu jsou špatně, tiery ZR4–ZR8
+  by měly být na 9,90.
+- Pokud **nemá** → patří ven z JSONu, jinak ho okfish při příštím synchronizačním
+  běhu přepíše zpátky na 9,90 a zákazník přijde o slevu.
+
+Poznámka: ranní tvrzení reportu, že „112824 má dnes strop 0 %, ve snapshotu
+−24,9 %, tedy snapshot je zastaralý" bylo nepřesné. Ta nula u ZR10+ je
+**per-tier max. sleva v ceníku**, ne produktový strop. Produktový strop je 10 %.
+
 ### Jedna věc k potvrzení
 
 1. ~~Strop 0 %~~ — **VYŘEŠENO** (Lucky, 7.9.): „strop je jako že tam nesmí
