@@ -2,7 +2,48 @@
 
 ## ⚠️ PRO LUCKYHO — PŘEČTI RÁNO JAKO PRVNÍ (7.9. noc)
 
-### 🔴 ŽIVÝ PRODUKČNÍ BUG: badge ukazuje HORŠÍ cenu, než zákazník dostane
+## ⚠️ STAŽENO — hlášený „produkční bug" žádný bug nebyl (7.9., Lucky)
+
+Ranní hláška o 93683 byla **můj chybný výklad**. Screenshoty z produkce +
+vysvětlení Luckyho to vyvrátily. Nechávám ji níž přeškrtnutou jako záznam,
+ale **neplatí**.
+
+### Jak to v Shoptetu doopravdy funguje (Lucky, 7.9.)
+
+**Nepoužíváme nativní Shoptet doplněk věrnostních slev.** NEXUS/okfish
+zapisuje **už vypočtené ceny** přímo do ceníků. Zaškrtávátka „Věrnostní
+sleva" / „Objemová sleva" / „Množstevní sleva" u produktu jsou proto
+**vypnutá záměrně** — aby Shoptet nepočítal nic navrch nad naše čísla.
+
+Vypnutá věrnostní sleva tedy **není** signál, že produkt slevu nemá.
+
+**Pole „Maximální povolená sleva" (sekce Slevy) má dva významy:**
+
+| Stav | Význam |
+|---|---|
+| ☑ zaškrtnuto + číslo | max % sleva, kterou smí **kupón** dát na hlavním ceníku nepřihlášenému |
+| ☐ nezaškrtnuto + číslo | max % **strop** na hlavním ceníku pro nepřihlášeného |
+
+U 93683 je ☑ s 5 % → kupón smí nepřihlášenému dát nejvýš 5 % z hlavního
+ceníku. **S tiery ZR16–ZR25 to nesouvisí** — ty drží naše zapsané ceny.
+
+### Proč tedy 12,71 vs 11,21 není rozpor
+
+Jsou to **dvě různé vrstvy**, ne dvě hodnoty téhož:
+- **12,71** = akční cena (pole „Akční cena", zaškrtnuté, bez časového omezení)
+  — to vidí nepřihlášený zákazník na badge
+- **11,21** = tierová cena ZR25 v ceníku — náš vypočtený výsledek
+
+Shadow harness je porovnával, jako by měly být shodné. Nemají.
+
+**Důsledek pro shadow harness:** kategorie `ALLOW_LOYALTY_DIVERGENCE`
+(14 rozdílů, 2 produkty) je **falešně pozitivní** — porovnává badge vrstvu
+proti ceníkové. Harness potřebuje rozlišit, kterou vrstvu měří. Zapsáno
+jako úkol, výsledky té kategorie zatím neplatí.
+
+---
+
+### ~~🔴 ŽIVÝ PRODUKČNÍ BUG: badge ukazuje HORŠÍ cenu, než zákazník dostane~~ (NEPLATÍ)
 
 **Kód 93683 (Čelovka DELPHIN Compact), tier ZR25: badge ukazuje 12,71 €,
 ceník má 11,21 €. Rozdíl 1,50 €.**
