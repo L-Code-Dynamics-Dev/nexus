@@ -36,6 +36,21 @@ export interface PolicyConfig {
     readonly loyaltyTiers: Record<string, number>;
     readonly brandLimits?: Record<string, number>;
     readonly categoryLimits?: Record<string, number>;
+    /**
+     * `brandSaleDiscounts` z legacy policy-v1.json -- celoroční brandová
+     * AKČNÍ CENA (DELPHIN 0.15, DELPHIN BOMB 0.15, MIVARDI 0.10, MIKADO 0.09).
+     *
+     * NENÍ TO STROP. `brandLimits` je maximální sleva, tohle je syntetizovaná
+     * akční cena pro produkty té značky, které vlastní akční cenu nemají --
+     * dvě nezávislé mapy, které se u MIVARDI náhodou shodují na 0.10.
+     * Konzumuje BrandSaleDiscountRule; podrobnosti a hraniční případy jsou
+     * v hlavičce toho souboru.
+     *
+     * Volitelné a v legacy formátu už existující -- tenhle řádek jen
+     * zpřístupňuje pole, které policy-v1.json nese od začátku, ale
+     * `PolicyConfig` ho zatím zahazoval. Žádná nová konfigurace.
+     */
+    readonly brandSaleDiscounts?: Record<string, number>;
 }
 
 /**
