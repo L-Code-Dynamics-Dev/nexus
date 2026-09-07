@@ -817,3 +817,60 @@ jeho přegenerování přes `ExecutionIntent`.
 
 Odpadá: kredit produkt, cart masking, kategorie -- tedy podstatná část
 frontend vrstvy, která se ještě nepsala.
+
+### 18.5 Reconciliační smyčka pro MULTI_USE (Lucky, 7.9.)
+
+Místo sekvenčního `DELETE` → `CREATE` se zapíše **záměr**:
+
+```
+REDUCE_VOUCHER_BALANCE  (ExecutionIntent)
+        │
+        ├─ EXECUTING          (perzistováno PŘED voláním Shoptetu)
+        │
+        ├─ EXECUTED           Shoptet potvrdil
+        ├─ FAILED             prokazatelně se nic nestalo -> retry bezpečný
+        └─ UNKNOWN            429 / 503 / timeout -> NEVÍME
+                 │
+                 ▼
+        Cloudflare Cron Trigger
+                 │
+                 ├─ zvedne nedokončený Intent
+                 ├─ ověří REÁLNÝ stav v Shoptetu (idempotentní GET)
+                 └─ dokončí, nebo označí DIVERGED pro člověka
+```
+
+Zákazník tak nikdy nepřijde o kredit a kód nezůstane ve vzduchoprázdnu.
+
+Vrstva už v repu je: `core/canonical/outcomes/` (`ExecutionIntent`,
+`IntentExecutor`, `IntentReconciliation`, `D1ExecutionIntentStore`,
+migrace `0003`). Voucher ji jen použije.
+
+### 18.6 `burned_unclaimed_amount` -- účetní podklad pro ONE_TIME
+
+Rozhodnutí Lucky: u MPV nastává zdanitelné plnění při dodání zboží.
+Když zákazník z poukazu na 5 000 Kč nakoupí za 3 000 Kč a zbytek propadne,
+z těch 2 000 Kč se stává **ostatní provozní výnos bez DPH** v okamžiku
+uplatnění/expirace.
+
+NEXUS proto porovná **nominál poukazu** proti **skutečně uplatněné slevě**
+a rozdíl zapíše jako `burned_unclaimed_amount`. Klient dostane čistý
+podklad: *"tady proběhlo zdanitelné plnění na zboží, tady je propadlý
+výnos k zaúčtování."*
+
+> **POZOR -- webhook tu informaci NENESE.**
+>
+> Ověřeno v oficiální dokumentaci (§17): `order:create` payload má jen
+> `eshopId`, `event`, `eventCreated`, `eventInstance`. **Žádnou slevu,
+> žádné položky.**
+>
+> Uplatněnou slevu je tedy nutné dotáhnout přes `GET /api/orders/{číslo}`.
+> To je síťové volání -> patří do `ctx.waitUntil()` a mělo by jít přes
+> `ExecutionIntent`, aby se selhání dotažení nedozvěděl nikdo až od účetní.
+>
+> Praktický důsledek: `burned_unclaimed_amount` se **nezapíše okamžitě**
+> s webhookem, ale až po úspěšném dotažení objednávky. Do té doby je
+> `NULL` -- a to je legitimní stav, ne chyba.
+
+Sloupec patří do `vouchers` (migrace navazující na `0001`), ne do
+`voucher_transactions`: není to pohyb kreditu, je to **zůstatek, který
+se pohybem nikdy nestal**.
