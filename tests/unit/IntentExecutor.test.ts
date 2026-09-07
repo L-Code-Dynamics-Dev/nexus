@@ -50,7 +50,11 @@ function makeIntent(overrides: Partial<ExecutionIntent> = {}): ExecutionIntent {
         targetRef: 'product-123',
         payload: { price: 199 },
         expectedState: { price: 199 },
-        state: 'PLANNED',
+        // EXECUTING, ne PLANNED: `executeIntent` provádí Intent, který už
+        // byl PERZISTOVANĚ nárokovaný přes `claimForExecution`. Kdyby
+        // přijímal PLANNED a přechod dělal sám, obešel by atomický claim
+        // a dva paralelní běhy by mohly zapsat dvakrát.
+        state: 'EXECUTING',
         idempotencyKey: 'pricing:UPDATE_PRICE:product-123:decision-1',
         attempt: 1,
         ...overrides,
@@ -191,7 +195,18 @@ describe('executeIntent -- provedení a mapování stavu', () => {
             executeIntent(makeIntent({ state: 'EXECUTED' }), POHODA, async () => ({
                 externalReference: 'x',
             })),
-        ).rejects.toThrow(/EXECUTED -> EXECUTING není dovolený/);
+        ).rejects.toThrow(/jen Intent ve stavu EXECUTING/);
+    });
+
+    it('NENÁROKOVANÝ Intent (PLANNED) se odmítne provést', async () => {
+        // Kdyby executeIntent přijal PLANNED a přechod udělal sám, obešel
+        // by atomický claim ve store -- a dva paralelní běhy by zapsaly
+        // do vnějšího systému dvakrát.
+        await expect(
+            executeIntent(makeIntent({ state: 'PLANNED' }), POHODA, async () => ({
+                externalReference: 'x',
+            })),
+        ).rejects.toThrow(/claimForExecution/);
     });
 
     it('actualState se čte jen při úspěchu, ne po chybě', async () => {

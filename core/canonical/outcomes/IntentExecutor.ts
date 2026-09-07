@@ -33,7 +33,6 @@ import type {
     ExecutionAttemptResult,
     ExecutionConfirmationQuality,
 } from './ExecutionIntent.js';
-import { canTransitionIntent } from './ExecutionIntent.js';
 
 /**
  * Surová odpověď zápisové cesty, ve tvaru, jaký dnes vrací
@@ -219,10 +218,19 @@ export async function executeIntent<TPayload, TExpected, TActual = unknown>(
     performWrite: (payload: TPayload) => Promise<RawWriteResult>,
     readActualState?: () => Promise<TActual>,
 ): Promise<IntentExecutionOutcome<TActual>> {
-    if (!canTransitionIntent(intent.state, 'EXECUTING')) {
+    // Intent MUSÍ už být EXECUTING -- nárokování (`claimForExecution`) se
+    // stalo dřív a je PERZISTOVANÉ. Tahle funkce stav nemění, jen provádí.
+    //
+    // Kdyby přijímala i PLANNED a přechod dělala sama, obešel by se tím
+    // atomický claim ve store a dva paralelní běhy by mohly zapsat dvakrát.
+    // Proto je podmínka `state === 'EXECUTING'`, ne `canTransitionIntent(...)`:
+    // ta by pustila PLANNED dovnitř a tiše rozbila celý smysl nárokování.
+    if (intent.state !== 'EXECUTING') {
         throw new Error(
-            `ExecutionIntent ${intent.id}: přechod ${intent.state} -> EXECUTING není dovolený. ` +
-                `Intent v terminálním nebo neočekávaném stavu se nesmí provádět znovu.`,
+            `ExecutionIntent ${intent.id}: provádět lze jen Intent ve stavu EXECUTING, ` +
+                `tenhle je ${intent.state}. Nejdřív ho nárokuj přes ` +
+                `ExecutionIntentStore.claimForExecution() -- ten přechod musí být ` +
+                `PERZISTOVANÝ, jinak se po pádu procesu neví, jestli se zápis provedl.`,
         );
     }
 

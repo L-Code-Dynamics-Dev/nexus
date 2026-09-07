@@ -95,6 +95,7 @@ Větev `chore/vitest-4-upgrade`, vše pushnuto, CI zelené.
 
 | Commit | Co |
 |---|---|
+| `c5c8996` | D1ExecutionIntentStore — produkční perzistence |
 | `7cb7237` | P1 IntentReconciliation — **řetěz uzavřen** |
 | `277af82` | **první implementace Connector kontraktu** (byla nula) |
 | `eb64217` | P1 perzistence Intentů — migrace 0003 + Store |
