@@ -149,6 +149,13 @@ Jediný dohledatelný snapshot skutečných vypočtených cen
 (`products_import.csv`, 100 produktů) vznikl **PŘED** zavedením
 `clearance-sale-products.json`. Důkazy (zafixované testem):
 
+- POZN. (Lucky, 7.9.): u `112824` je zápis níž zavádějící. Produkt je
+  v `zero-discount-products.json` SPRÁVNĚ (značka FISHING POINT, brandLimit
+  10 %), loyalty slevu tedy nedostává a cena 9,90 je korektní. Hodnoty
+  6/4/2 u ZR4/ZR6/ZR8 v Shoptet ceníku NEJSOU loyalty slevy, ale prostor
+  pro KUPÓN vedle běžící 20% akce (`coupon-policy.json`:
+  `defaultMaxDiscount: 20`, `lockedTiers: ZR20/ZR25`). Ceník v administraci
+  míchá obě vrstvy do jedné tabulky.
 - kód `112824` je dnes v `zero-discount-products.json` (strop 0 %), ale
   ve snapshotu má na ZR25 slevu ~24,9 %;
 - kód `3963P-S` je dnes v `clearance-sale-products.json` (20 % v okně

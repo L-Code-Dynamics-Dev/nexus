@@ -74,36 +74,26 @@ Další rozdíly mezi enginy:
 že Decimal ROUND_HALF_UP == integer-cents). Ale rozhodnutí, **který engine
 má pravdu**, je tvoje — a oprava toho druhého změní ceny.
 
-### 🟠 112824 — konfigurace a Shoptet se rozcházejí (7.9., ověřeno screenshotem)
+### ✅ 112824 — VYŘEŠENO, žádný konflikt (Lucky, 7.9.)
 
-Kód **112824 (Mletá káva FISH)** je v `src/config/policies/zero-discount-products.json`
-(206 položek) — okfish ho tedy považuje za produkt, který **nesmí dostat žádnou slevu**.
+Ráno jsem hlásil rozpor mezi `zero-discount-products.json` a Shoptetem.
+**Byl to můj chybný výklad screenshotu.** Vysvětlení od Luckyho:
 
-Ale v Shoptet administraci má:
+- **Značka je FISHING POINT** a má v `brandLimits` strop **10 %** — dlouhodobě.
+- **112824 je v `zero-discount-products.json`** správně → loyalty slevu
+  nedostane, cena zůstává 9,90. Okfish to počítá dobře.
+- **Čísla 6 / 4 / 2 u ZR4 / ZR6 / ZR8 nejsou slevy**, ale zbývající prostor
+  pro **kupón** vedle běžící 20% akce.
+- `coupon-policy.json`: `defaultMaxDiscount: 20`, `lockedTiers: ["ZR20","ZR25"]`
+  → vyšší tiery kupón nedostanou vůbec, proto je u nich nula.
 
-| Tier | Max. sleva | Cena |
-|---|---|---|
-| ZR4 | 6 % | **9,50** |
-| ZR6 | 4 % | 9,31 |
-| ZR8 | 2 % | 9,11 |
-| ZR10–ZR25 | 0 % | 8,91 |
+Ceny 9,50 / 9,31 / 9,11 v ceníku tedy nejsou výsledek loyalty slevy, ale
+hodnoty pro **kupónovou vrstvu**. Nic není rozbité.
 
-Plus globálně **Maximální povolená sleva = 10 %**.
-
-Shadow běh to zachytil: base 9,90, okfish spočítal 9,90 (žádná sleva),
-NEXUS bez limitů 9,50. **V produkci je 9,50** — tedy hodnota, kterou dal NEXUS.
-
-**Otázka pro Luckyho:** má 112824 v `zero-discount-products.json` být, nebo
-se tam dostal omylem? Z kódu to nerozhodnu — je to obsah konfigurace, ne logika.
-
-- Pokud **má** být bez slevy → ceny v Shoptetu jsou špatně, tiery ZR4–ZR8
-  by měly být na 9,90.
-- Pokud **nemá** → patří ven z JSONu, jinak ho okfish při příštím synchronizačním
-  běhu přepíše zpátky na 9,90 a zákazník přijde o slevu.
-
-Poznámka: ranní tvrzení reportu, že „112824 má dnes strop 0 %, ve snapshotu
-−24,9 %, tedy snapshot je zastaralý" bylo nepřesné. Ta nula u ZR10+ je
-**per-tier max. sleva v ceníku**, ne produktový strop. Produktový strop je 10 %.
+**Co si z toho beru:** ceník v Shoptet administraci míchá dvě různé vrstvy
+(loyalty a kupón) do jedné tabulky, a bez znalosti kontextu se to dá přečíst
+špatně — což jsem udělal. Shadow harness porovnává jen loyalty vrstvu,
+takže rozdíl 9,90 vs 9,50 hlásil správně jako `LIMIT_SOURCE`, ne jako chybu.
 
 ### Jedna věc k potvrzení
 
