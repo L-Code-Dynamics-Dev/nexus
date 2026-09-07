@@ -2,6 +2,57 @@
 
 ## ⚠️ PRO LUCKYHO — PŘEČTI RÁNO JAKO PRVNÍ (7.9. noc)
 
+### 🔴 ŽIVÝ PRODUKČNÍ BUG: zákazník vidí jinou cenu, než zaplatí
+
+**Kód 93683 (DELPHIN), tier ZR25: badge ukazuje 12,71 €, ceník má 11,21 €.
+Rozdíl 1,50 € na jednom produktu.**
+
+Příčina: `pricing-bridge.ts:87` posílá root enginu `allowLoyaltyDiscount: true`
+**natvrdo**, zatímco worker engine čte `applyLoyaltyDiscount` z feedu. Když má
+produkt ve feedu `=0`, oba enginy se rozejdou.
+
+Ve feedu má `applyLoyaltyDiscount=0` **osm produktů**. U šesti z nich to náhodou
+maskuje zero-discount limit nebo sale-wins větev — takže se to neprojeví.
+U dvou ano.
+
+To není teorie z návrhu. Změřeno na **167 580 porovnáních** reálných dat
+z živého feedu: shoda 99,9845 %, **26 rozdílů na 4 produktech**, obě příčiny
+ručně přepočítané, nevysvětlených nula.
+
+Druhá příčina (12 rozdílů): brandSale zaokrouhlení o 1 haléř. Root počítá
+nativním `Math.round` (float chyba), worker přes integer-cents.
+Pravdu má worker: `2,30 × 0,85 = 1,955` → root dá 1,95, worker správně 1,96.
+
+**Co s tím:** oprava je jednořádková (`pricing-bridge.ts:87` má číst z feedu,
+ne posílat `true`), ale **změní ceny** — proto to nechávám na tebe.
+
+### NEXUS vs okfish: nevysvětlených rozdílů NULA
+
+Harness porovnal NEXUS chain proti okfish root enginu ve třech režimech:
+
+| Režim | Shoda | Zbývající rozdíly |
+|---|---|---|
+| `naive` (dnešní NEXUS) | 98,67 % | 2 235 — chybí limits (2 071) a brandSale (164) |
+| `with-limits` | 99,90 % | 164 — jen brandSale, 35 produktů |
+| `adapted` (s doplněnou logikou) | **100,000000 %** | **0** |
+
+Ten třetí řádek je důkaz, že v NEXUS chainu **není žádný neznámý bug** — kdyby
+byl, 100 % by nevyšlo. Všechny rozdíly jsou vysvětlené chybějící logikou,
+kterou jsem v noci doplnil (4 nové Rules, 110 testů).
+
+Nejdražší případ: HONDA 99694 na ZR25 by NEXUS bez limitů prodal o **1 707,50 €**
+levněji.
+
+**Mezera, kterou přiznávám:** běh nad `products.csv` z repa dá falešnou 100%
+shodu, protože tomu souboru chybí sloupce `manufacturer` a `applyLoyaltyDiscount`
+— nenašel by ani jeden ze čtyř nálezů. Harness proto jede nad živým feedem.
+
+Harness: `tools/shadow/run.sh p3|p2`, report `docs/shadow-reports/SHADOW-RUN-2026-09-07.md`.
+Zero production writes: jediné volání je GET na veřejný feed, harness tvrdě
+padá při přítomnosti `SHOPTET_PRIVATE_API_TOKEN`.
+
+---
+
 ### Okfish se sám se sebou neshoduje. Týká se to živého e-shopu DNES.
 
 Nález je **nezávislý na migraci do NEXUSu** — je to stav produkce.
@@ -37,6 +88,59 @@ Detaily: `docs/shadow-reports/MISSING-PRICING-LOGIC.md`
 
 ---
 
+
+## 2026-09-07 (noc) — P0 hotové, P1 základ, 892 testů
+
+Větev `chore/vitest-4-upgrade`, vše pushnuto.
+
+| Commit | Co |
+|---|---|
+| `10d5a0c` | P1 IntentExecutor -- most Intent → Connector |
+| `adce7f3` | 4 chybějící pricing Rules + nález o okfishi |
+| `4458641` | P0 dokončeno + ExecutionIntent vrstva |
+| `ebdb2fd` | P0.1 jeden zdroj pravdy pro canonical typy |
+
+**Testy: 892/892** (ráno bylo 754), tsc čistý, D1 testy 19/19 na CI.
+
+### P0 — hotové celé
+
+1. **Duplicitní `CanonicalEntity`** — `core/tenant/types.ts` měl vlastní kopii
+   s komentářem „dočasně, než vznikne base.ts". Ten soubor už rok existoval.
+   Teď reexport z kanonického zdroje.
+2. **Hardcoded `tenantId: 'ten_1'`** — byl v `createNexusPricingCalculator`.
+   `TenantContext` teď přichází zvenku jako povinný parametr + runtime guard
+   `assertTenantContext()` s blacklistem placeholderů.
+3. **`PricingConfigurationProvider`** — pricing četl `fs.readFileSync`, takže
+   **nemohl běžet v Cloudflare Workeru vůbec**. Celý cenový řetěz byl odříznutý
+   od runtime postaveného pro voucher. Port v doméně, FS implementace
+   v konektorech.
+4. **README a MIGRATION_PLAN** — tvrdily, že `domains/` je prázdné a žádná
+   doména nemá business logiku. 13 z 15 domén má kód. Opraveno včetně
+   závazného P0/P1/P2 bloku.
+
+### P1 — Execution vrstva, základ
+
+`ExecutionIntent` + `IntentExecutor` v `core/canonical/outcomes/`.
+
+`Reconciliation.ts` měl v hlavičce řetěz `SOURCE → DECISION → EXPECTED →
+EXECUTION → ACTUAL → RECONCILIATION`, ale existovaly jen konce. Prostředek —
+„co konkrétně se má stát ve vnějším systému" — typ neměl, takže si ho každá
+doména vyráběla jinak (voucher HOLD v route handleru, omega LOG_INFERRED
+v konektoru, pricing PATCH v GitHub Actions).
+
+Nejdůležitější vlastnost: **`UNKNOWN` je plnohodnotný stav vedle `FAILED`,
+odlišený na úrovni typu.** Kdo obojí splácne do „nepovedlo se", napíše slepý
+retry — a to je u Omegy, která nededuplikuje, cesta k duplicitní faktuře.
+
+### Zbývá k P1
+
+- Perzistence Intentů (D1 tabulka) — bez ní nejde stav `EXECUTING` uložit
+  před voláním vnějšího systému
+- Napojit existující konektory na `Connector` rozhraní — dnes má
+  `implements Connector` **nula výskytů** v celém repu
+- Reconciliační smyčka nad `requiresReconciliation()`
+
+---
 
 ## 2026-09-07 — Fáze A HOTOVÁ, CI zelené, atomicita OVĚŘENA
 
