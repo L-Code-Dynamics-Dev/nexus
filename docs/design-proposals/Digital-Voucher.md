@@ -622,3 +622,51 @@ Fáze A–D jsou odblokované. Zbývající dluhy (`connectors/erp-generic/`,
 přejmenování `omegaDocumentId`, umístění admin UI) jsou **mimo tento návrh**
 a žádnou fázi neblokují.
 Zapsáno 2026-09-06 (v3).
+
+---
+
+## 16. Shoptet webhook -- TVRDÁ ČASOVÁ OMEZENÍ (7.9.2026)
+
+Zjištěno z oficiální dokumentace
+(https://developers.shoptet.com/api/documentation/webhooks/):
+
+| Omezení | Hodnota |
+|---|---|
+| Odpověď webhooku | **HTTP 200 do 4 sekund** |
+| Odpověď instalačního callbacku | **HTTP 200 do 5 sekund** |
+| Opakování při selhání | **3 pokusy po 15 minutách** |
+| URL na event | jen jedna |
+| Podpis | HMAC-SHA1 |
+| Zdrojová IP | **185.184.254.0/24** |
+
+### Co to znamená pro issuance (§4)
+
+**Fáze C (PDF + e-mail) SE NESMÍ dělat synchronně uvnitř webhooku.**
+Generování PDF a odeslání přes Resend se do 4 sekund nevejde spolehlivě --
+a když se nevejde, Shoptet webhook zopakuje. Idempotence přes
+`uq_vouchers_source_order` sice zabrání druhému poukazu, ale zákazník
+dostane e-mail dvakrát a v logu bude vypadat všechno jako chyba.
+
+Správný tvar:
+1. webhook **jen** ověří podpis, zapíše poukaz do D1 a vrátí 200
+2. PDF a e-mail se odloží přes `ctx.waitUntil()` nebo Queue
+
+Dnešní stav je v pořádku: `routes/issuance.ts` končí zápisem do D1,
+PDF ani e-mail nedělá. **Při implementaci Fáze C se to nesmí přidat
+do synchronní cesty.**
+
+### Co to znamená pro redemption (§6.2)
+
+Přepočet částky a atomický odečet jsou rychlé (dva D1 dotazy), ale
+`HOLD` větev zapisuje navíc do `voucher_audit`. I to je pod limitem --
+pozor ale na to, aby se do webhooku nikdy nedostalo volání Shoptet API
+nebo cokoli s vlastním síťovým round-tripem.
+
+### Ověření zdroje
+
+Shoptet volá jen z `185.184.254.0/24`. Worker to může použít jako
+allowlist -- levnější první filtr než ověřování HMAC podpisu, a odřízne
+to náhodné boty dřív, než se dostanou k D1.
+
+**Pozor:** IP allowlist NENAHRAZUJE ověření podpisu. Je to první síto,
+ne autentizace -- HMAC-SHA1 kontrola musí zůstat.
