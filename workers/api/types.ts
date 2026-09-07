@@ -182,6 +182,11 @@ export interface Env {
      */
     readonly NEXUS_FORWARD_TOKEN?: string;
     /**
+     * Shoptet Private API token pro čtení objednávek (§18.7 audit).
+     * PRODUKČNÍ token okfish.sk -- zápis blokuje ReadOnlyGuard.
+     */
+    readonly SHOPTET_API_TOKEN?: string;
+    /**
      * Délka platnosti poukazu v MĚSÍCÍCH (§8: default 12 = 1 rok, §11:
      * konfigurovatelné per tenant). Bez hodnoty se použije default 12.
      *

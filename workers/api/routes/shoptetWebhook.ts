@@ -40,6 +40,12 @@
 
 import { ApiError, jsonResponse, log } from '../http.js';
 import type { Env } from '../types.js';
+import {
+    ShoptetApiClient,
+    ShoptetApiError,
+    sumOrderDiscountsMinor,
+    type ShoptetOrder,
+} from '../../../connectors/shoptet/ShoptetApiClient.js';
 
 /** Hlavička s podpisem, jak ji posílá Shoptet (a okfish přeposílá beze změny). */
 const SIGNATURE_HEADER = 'Shoptet-Webhook-Signature';
@@ -179,11 +185,10 @@ export async function handleShoptetWebhook(
  * by znamenalo, že se poukaz buď nikdy nevystaví, nebo se vystaví za
  * něco jiného.
  */
-async function processOrderEvent(payload: ShoptetWebhookPayload, _env: Env): Promise<void> {
+async function processOrderEvent(payload: ShoptetWebhookPayload, env: Env): Promise<void> {
     const orderNumber = payload.eventInstance;
 
     if (orderNumber === undefined || orderNumber === '') {
-        // Payload bez čísla objednávky je pro nás k ničemu -- není co dotáhnout.
         log('error', 'webhook.order_event.missing_instance', {
             alert: true,
             event: payload.event,
@@ -191,16 +196,60 @@ async function processOrderEvent(payload: ShoptetWebhookPayload, _env: Env): Pro
         return;
     }
 
-    log('info', 'webhook.order_event', {
-        event: payload.event,
-        // Číslo objednávky NENÍ osobní údaj -- payload jich žádné neobsahuje
-        // (viz komentář u ShoptetWebhookPayload), takže se loguje celé.
-        orderNumber: String(orderNumber),
+    const orderCode = String(orderNumber);
+
+    // Bez tokenu se objednávka nedotáhne. NENÍ to chyba requestu -- webhook
+    // už odpověděl 200; je to chybějící konfigurace, kterou musí vidět
+    // obsluha. Alert, ne tichý návrat.
+    const apiToken = env.SHOPTET_API_TOKEN;
+    if (apiToken === undefined || apiToken === '') {
+        log('error', 'webhook.audit.token_missing', {
+            alert: true,
+            orderCode,
+            hint: 'wrangler secret put SHOPTET_API_TOKEN',
+        });
+        return;
+    }
+
+    // §18.7 krok 3: dotáhnout objednávku. READ-ONLY -- klient je
+    // konstruován s výchozím ReadOnlyGuard, takže do Shoptetu nic nezapíše.
+    const client = new ShoptetApiClient(apiToken);
+
+    let order: ShoptetOrder;
+    try {
+        order = await client.getOrder(orderCode);
+    } catch (error) {
+        const definite = error instanceof ShoptetApiError ? error.definiteFailure : false;
+        // `definiteFailure: false` (timeout, 5xx, 429) znamená NEVÍME --
+        // audit se musí zopakovat. Až bude tenhle tok pod ExecutionIntent,
+        // skončí to ve stavu UNKNOWN a vyzvedne si to reconciliační smyčka.
+        log(definite ? 'warn' : 'error', 'webhook.audit.order_fetch_failed', {
+            alert: !definite,
+            orderCode,
+            definiteFailure: definite,
+            retryNeeded: !definite,
+            message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+    }
+
+    // §18.7 krok 3: spočítat skutečně uplatněnou slevu.
+    const discounts = sumOrderDiscountsMinor(order);
+
+    // Nominál poukazu ještě neumíme spárovat -- k tomu je potřeba vědět,
+    // KTERÝ poukaz se v objednávce uplatnil. Kód kupónu je v `order`, ale
+    // jeho tvar není ověřený proti reálné odpovědi.
+    //
+    // VĚDOMĚ NEDOKONČENO: spárování a zápis burned_unclaimed_minor
+    // (migrace 0004) přijdou, až bude k dispozici reálná odpověď
+    // /api/orders. Do té doby se loguje, co se spočítat DALO -- a to je
+    // zároveň materiál, podle kterého se ten tvar potvrdí.
+    log('info', 'webhook.audit.discounts_read', {
+        orderCode,
         eshopId: payload.eshopId,
-        // TODO(Fáze B, kroky 2-4): GET /api/orders/{orderNumber} -> najít
-        // voucher produkt -> vystavit poukaz. Chybí SHOPTET_API_TOKEN v Env
-        // a potvrzený kód voucher produktu.
-        pending: 'order-fetch-not-wired',
+        discountsRecognised: discounts.recognised,
+        discountsMinor: discounts.recognised ? discounts.totalMinor : null,
+        pending: 'voucher-match-not-wired',
     });
 }
 
