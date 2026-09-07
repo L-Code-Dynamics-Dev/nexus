@@ -670,3 +670,63 @@ to náhodné boty dřív, než se dostanou k D1.
 
 **Pozor:** IP allowlist NENAHRAZUJE ověření podpisu. Je to první síto,
 ne autentizace -- HMAC-SHA1 kontrola musí zůstat.
+
+---
+
+## 17. Stav okfish API a webhooků -- OVĚŘENO NAŽIVO (7.9.2026)
+
+Ověřeno produkčním tokenem proti `api.myshoptet.com`, **výhradně GET dotazy**
+(zápis blokuje `connectors/shoptet/ReadOnlyGuard.ts`).
+
+### 17.1 Token má plný rozsah -- nic se rozšiřovat nemusí
+
+E-shop **okfish.sk**, `eshopId: 767740`. Autentizace hlavičkou
+`Shoptet-Private-API-Token` (NE `Shoptet-Access-Token`, ta vrací 401).
+
+| Endpoint | Stav |
+|---|---|
+| `/api/eshop` | 200 |
+| `/api/orders` | 200 |
+| `/api/products` | 200 |
+| `/api/customers` | 200 |
+| **`/api/webhooks`** | **200** |
+| `/api/pricelists` | 200 |
+| `/api/stocks` | 200 |
+
+Pozn.: parametr `?limit=` vrací 400 -- není podporovaný, stránkuje se jinak.
+
+### 17.2 ⚠️ WEBHOOKY UŽ EXISTUJÍ A MÍŘÍ NA OKFISH WORKER
+
+```
+order:create      -> shoptet-vip-worker.hlancaric.workers.dev
+order:update      -> shoptet-vip-worker.hlancaric.workers.dev
+customer:create   -> shoptet-vip-worker.hlancaric.workers.dev
+product:create    -> shoptet-vip-worker.hlancaric.workers.dev
+product:update    -> shoptet-vip-worker.hlancaric.workers.dev
+```
+
+**Shoptet dovolí JEN JEDNU URL NA EVENT.**
+
+Registrovat NEXUS na `order:create` by tedy stávající webhook **PŘEPSALO**
+a okfish by přestal dostávat objednávky -- tichý výpadek produkčního systému,
+který by se poznal až podle nesynchronizovaných cen.
+
+**Tři cesty, jak to řešit (rozhodnutí Lucky):**
+
+1. **Řetězení v okfish Workeru** -- okfish po svém zpracování přepošle
+   payload NEXUSu. Nejmenší zásah do Shoptet konfigurace, ale znamená
+   změnu v živém okfish Workeru a vytváří závislost NEXUS → okfish.
+2. **Společný rozcestník** -- nová URL, která přijme webhook a rozešle ho
+   oběma systémům. Čisté, ale je to nový bod selhání před oběma.
+3. **Počkat na vlastní e-shop / sandbox** -- voucher se rozjede jinde
+   a okfish se nechá být, dokud nebude celý přechod na NEXUS.
+
+**Do rozhodnutí: NEXUS webhook NEREGISTROVAT.** Zápis do `/api/webhooks`
+je `POST`, takže ho `ReadOnlyGuard` zablokuje -- ale je potřeba to vědět,
+ne na to spoléhat.
+
+### 17.3 Co z toho plyne pro Fázi B
+
+Čtecí část jde postavit hned: validace kódu, přepočet částky, čtení
+objednávky přes `/api/orders`. Chybí jen spouštěč -- a ten je závislý
+na rozhodnutí výše.
