@@ -38,17 +38,48 @@ shoda:      167 554  (99,9845 %)
 rozdílů:    26  na  4 produktech
 ```
 
+> ## ⚠️ OPRAVA 2026-09-07 — první nález byl FALEŠNÝ
+>
+> Tenhle report původně hlásil `ALLOW_LOYALTY_DIVERGENCE` jako produkční bug
+> s vysokou závažností. **Byl to chybný závěr.** Stál na předpokladu, že
+> worker a root engine mají počítat totéž — nemají:
+>
+> | Engine | Počítá | Pro koho |
+> |---|---|---|
+> | worker mini-engine | **badge** (akční cena) | nepřihlášený |
+> | root / bridge | **tierové ceny** do ceníků | přihlášený |
+>
+> Okfish navíc **nepoužívá nativní Shoptet loyalty doplněk** — zapisuje hotové
+> ceny do velkoobchodních ceníků právě proto, aby Shoptet slevy naivně
+> nesčítal (`ENGINE_BUSINESS_OVERVIEW.md`).
+>
+> Třída je přejmenovaná na `LAYER_BADGE_VS_PRICELIST` a je **očekávaná**,
+> ne nález. Viz `docs/SHOPTET-PRICING-MODEL.md` §4.
+>
+> **Poučení:** odpověď byla celou dobu v okfish dokumentaci (3 380 řádků)
+> a ve skillu `shoptet-pricing-engine`. Analýza vznikla dovozováním z kódu
+> a screenshotů. Napřed dokumentace, potom kód.
+
 | Třída | Rozdílů | Produktů | Závažnost |
 |---|---|---|---|
-| `ALLOW_LOYALTY_DIVERGENCE` | 14 | 2 | **VYSOKÁ** — až −1,50 €/kus |
+| `LAYER_BADGE_VS_PRICELIST` | 14 | 2 | **žádná** — očekávaný rozdíl mezi vrstvami |
 | `BRAND_SALE_ROUNDING` | 12 | 2 | nízká — přesně 1 haléř |
 
-### 2.1 `ALLOW_LOYALTY_DIVERGENCE` — reálná divergence, ne zaokrouhlení
+### 2.1 `LAYER_BADGE_VS_PRICELIST` — očekávaný rozdíl mezi vrstvami, NE chyba
 
-**Příčina:** `pricing-bridge.ts` řádek 87 posílá do root enginu `allowLoyaltyDiscount: true`
-**natvrdo**. Worker mini-engine naproti tomu čte `applyLoyaltyDiscount` z feedu
-(`resolveAllowLoyaltyDiscount`, pricing.ts:98). Když je ve feedu `0`, worker loyalty vypne,
-root engine ji spočítá.
+**Mechanismus:** `pricing-bridge.ts` řádek 87 posílá do root enginu
+`allowLoyaltyDiscount: true` natvrdo. Worker mini-engine čte
+`applyLoyaltyDiscount` z feedu (`resolveAllowLoyaltyDiscount`, pricing.ts:98).
+Když je ve feedu `0`, worker loyalty vypne, root engine ji spočítá.
+
+**Proč to není bug:** každý engine obsluhuje jinou vrstvu. Worker říká, co má
+vidět nepřihlášený na badge; root říká, jaké ceny se zapíšou do tierových
+ceníků pro přihlášené. Že se u produktu s vypnutou loyalty rozejdou, je
+důsledek téhle dělby.
+
+Konkrétně u 93683 (Čelovka DELPHIN Compact, base 14,95): badge 12,71 = akční
+cena, ceník ZR25 11,21 = tierová cena. Dvě různé nabídky pro dva různé
+zákazníky, obě správné.
 
 Ve feedu má `applyLoyaltyDiscount = "0"` **8 produktů**. Rozdíl se projevil jen u 2 —
 u zbylých 6 ho náhodou zamaskovala jiná ochrana:
@@ -245,12 +276,20 @@ jen jako poslední fallback a hlásí zdroj dat v každém výstupu.
 
 ## 5. Co z toho plyne pro migraci
 
-1. **Nejdůležitější nález není o migraci, ale o dnešní produkci.**
-   `ALLOW_LOYALTY_DIVERGENCE` (§2.1) je živý rozpor mezi cenou v badge a cenou v ceníku,
-   až 1,50 € na kus. Existuje bez ohledu na NEXUS a měl by se opravit v okfishi — buď
-   protažením `applyLoyaltyDiscount` do root enginu (stejnou cestou jako `manufacturer`),
-   nebo vědomým rozhodnutím, že to pole se ignoruje, a jeho odstraněním z worker enginu.
-   Dokud existují dva enginy, tenhle typ chyby se bude vracet.
+1. ~~**Nejdůležitější nález není o migraci, ale o dnešní produkci.**~~
+   **STAŽENO 2026-09-07** — viz oprava v §2. `LAYER_BADGE_VS_PRICELIST`
+   (dříve `ALLOW_LOYALTY_DIVERGENCE`) **není rozpor ani nález**. Worker
+   počítá badge pro nepřihlášeného, root/bridge tierové ceny pro
+   přihlášeného — dvě vrstvy, dva zákazníci, obě hodnoty správné.
+
+   Dva enginy nejsou vada k odstranění, ale **záměrná dělba**: nativní
+   Shoptet loyalty doplněk se nepoužívá právě proto, že slevy naivně sčítá.
+   Návrh „protáhnout `applyLoyaltyDiscount` do root enginu" nebo „odstranit
+   to pole z workeru" by rozbil fungující systém.
+
+   `ENGINE_TECHNICAL_TEMPLATE.md` §1 to má jako Worker/root deploy boundary
+   a `CORE_LOGIC_AND_VALIDATION.md` §1.2 vysvětluje, proč
+   `resolveEffectiveLimit()` duplikuje logiku místo sdíleného importu.
 
 2. **NEXUS cenové jádro je prokazatelně v pořádku.** `adapted` režim dal 100,000000 % na
    167 580 kombinacích, reziduum 0. Chybějící kusy nejsou bugy v Rules — je to **konfigurační

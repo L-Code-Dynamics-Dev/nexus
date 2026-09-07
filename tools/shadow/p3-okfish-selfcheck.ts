@@ -29,11 +29,40 @@ import { normalizeRow, toRootEngineProduct, type NormalizedProduct } from './ada
 
 export type P3Class =
     | 'ROUNDING_CENT'
-    | 'ALLOW_LOYALTY_DIVERGENCE'
+    /**
+     * OČEKÁVANÝ ROZDÍL MEZI VRSTVAMI, NE BUG (opraveno 2026-09-07 po
+     * konzultaci s autorem enginu).
+     *
+     * Původně `ALLOW_LOYALTY_DIVERGENCE` a označené jako "VYSOKÁ závažnost,
+     * živý produkční rozpor". Byl to chybný závěr postavený na předpokladu,
+     * že worker a root engine mají počítat totéž. NEMAJÍ:
+     *
+     *   worker mini-engine  -> BADGE pro NEPŘIHLÁŠENÉHO (akční cena)
+     *   root/bridge engine  -> TIEROVÉ CENY do ceníků pro PŘIHLÁŠENÉHO
+     *
+     * Jsou to dvě různé vrstvy pro dva různé zákazníky (viz
+     * docs/SHOPTET-PRICING-MODEL.md §4). Že se u produktu s
+     * `applyLoyaltyDiscount=0` liší, je důsledek téhle dělby, ne chyba.
+     *
+     * Okfish navíc NEPOUŽÍVÁ nativní Shoptet loyalty doplněk -- zapisuje
+     * hotové ceny do velkoobchodních ceníků právě proto, aby Shoptet slevy
+     * naivně nesčítal (`ENGINE_BUSINESS_OVERVIEW.md`).
+     */
+    | 'LAYER_BADGE_VS_PRICELIST'
     | 'INVALID_BASEPRICE_FALLBACK'
     | 'MISSING_TIER'
     | 'BRAND_SALE_ROUNDING'
     | 'UNCLASSIFIED';
+
+/**
+ * Třídy, které NEJSOU nálezem -- jsou to vysvětlené a očekávané rozdíly.
+ * Report je nesmí prezentovat jako problém k opravě.
+ */
+export const EXPECTED_P3_CLASSES: readonly P3Class[] = [
+    'LAYER_BADGE_VS_PRICELIST',
+    'ROUNDING_CENT',
+    'BRAND_SALE_ROUNDING',
+];
 
 export interface P3Diff {
     code: string;
@@ -61,8 +90,11 @@ function classify(p: NormalizedProduct, rootPrice: number | null, workerPrice: n
     // Worker fallback při neplatné basePrice: vrací basePrice pro všechny tiery.
     if (p.basePrice === undefined || p.basePrice <= 0) return 'INVALID_BASEPRICE_FALLBACK';
 
-    // pricing-bridge posílá allowLoyaltyDiscount=true natvrdo, worker čte feed.
-    if (!p.allowLoyaltyDiscount) return 'ALLOW_LOYALTY_DIVERGENCE';
+    // Produkt s `applyLoyaltyDiscount=0`: worker (badge) loyalty vypne,
+    // root/bridge (ceník) ji spočítá. NENÍ to rozpor -- každý engine
+    // obsluhuje jinou vrstvu pro jiného zákazníka. Viz komentář u
+    // `LAYER_BADGE_VS_PRICELIST` výš a docs/SHOPTET-PRICING-MODEL.md §4.
+    if (!p.allowLoyaltyDiscount) return 'LAYER_BADGE_VS_PRICELIST';
 
     const delta = Math.abs(rootPrice - workerPrice);
     if (delta <= 0.0101) {
