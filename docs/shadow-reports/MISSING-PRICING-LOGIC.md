@@ -196,13 +196,22 @@ Ze zadání jsem řešil čtyři body. Z §3.1 zbývají nedotčené:
 
 ### 4.5 Kde si nejsem jistý shodou
 
-- **Strop 0 % se chová jako ŽÁDNÝ strop.** Ve workeru `minAllowedPrice > 0`
-  znamená, že `applyPercent(base, 0) == base > 0`, takže podlaha == base
-  a každá loyalty cena se zvedne zpátky na základní. NEXUS `DiscountLimitRule`
-  s `productMaxDiscount = 0` dělá totéž (`minAllowedPrice = base`,
-  `currentPrice < base` → zvednutí). Ověřeno testem, ale je to natolik
-  neintuitivní chování, že by ho měl někdo potvrdit jako ZÁMĚR, ne jako
-  shodnou vadu obou implementací.
+- ~~**Strop 0 % se chová jako ŽÁDNÝ strop.**~~ **VYŘEŠENO — Lucky potvrdil
+  2026-09-07: „strop je jako že tam nesmí být žádná sleva".**
+
+  Původní formulace byla zavádějící. `minAllowedPrice = applyPercent(base, 0)
+  = base` znamená, že podlaha ceny je rovna základní ceně, takže **každá
+  sleva se zvedne zpátky na plnou cenu** — tedy přesně „žádná sleva se
+  nesmí dát". Není to „žádný strop", je to **nejpřísnější možný strop**.
+
+  Ověřeno výpočtem přes `DiscountLimitRule`: limit 0 %, cena slevněná ze
+  100 na 80 → `{"applied":true,"price":"100","rule":"PRODUCT_LIMIT"}`.
+  Totéž u `BRAND_LIMIT`. Obě implementace (worker i NEXUS) se shodují
+  a chovají se podle záměru.
+
+  Souvisí to s tím, proč `DiscountLimitRule` kontroluje `!== undefined`
+  a ne truthy hodnotu: kdyby testovala truthy, limit `0` by propadl jako
+  „limit není nastaven" a chráněný produkt by šel do slevy bez omezení.
 - **`brandSaleActionPrice` jako zápisový signál.** V okfishi ho
   `sync-orchestrator.ts` používá k rozhodnutí, které kódy potřebují reálný
   zápis `actionPrice` na základní/GUEST ceník. NEXUS ho vrací jako

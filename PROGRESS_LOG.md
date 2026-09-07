@@ -74,11 +74,14 @@ Další rozdíly mezi enginy:
 že Decimal ROUND_HALF_UP == integer-cents). Ale rozhodnutí, **který engine
 má pravdu**, je tvoje — a oprava toho druhého změní ceny.
 
-### Dvě věci k potvrzení
+### Jedna věc k potvrzení
 
-1. **Strop 0 % se chová jako ŽÁDNÝ strop** — v obou enginech. Je to záměr,
-   nebo bug? Natolik neintuitivní, že to nechci považovat za správné bez
-   tvého slova.
+1. ~~Strop 0 %~~ — **VYŘEŠENO** (Lucky, 7.9.): „strop je jako že tam nesmí
+   být žádná sleva". Formulace v reportu byla zavádějící — `minAllowedPrice
+   = base` znamená, že se každá sleva zvedne zpátky na plnou cenu, tedy
+   **nejpřísnější možný strop**, ne žádný. Ověřeno výpočtem: limit 0 %,
+   cena 80 ze 100 → Rule vrátí 100. Obě implementace se shodují a chovají
+   se podle záměru.
 2. **Clearance okna a `PRODUCT_LIMITS` nejdou ověřit proti produkci** —
    jediný snapshot vypočtených cen vznikl PŘED zavedením těch tří JSON
    souborů (`112824` má dnes strop 0 %, ve snapshotu −24,9 %). Parita je
