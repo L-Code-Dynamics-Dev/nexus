@@ -14,10 +14,13 @@
 
 import * as fs from 'fs';
 
-export const MASTER_FEED_URL =
-    'https://www.okfish.sk/export/products.csv' +
-    '?patternId=32&partnerId=4' +
-    '&hash=REDACTED_OKFISH_EXPORT_HASH';
+/**
+ * URL master feedu okfish (Shoptet export) — NIKDY natvrdo v repu.
+ * Obsahuje přístupový hash exportu; kdo ho zná, stáhne celý export.
+ * Nastav: `export OKFISH_MASTER_FEED_URL='https://www.okfish.sk/export/products.csv?…'`
+ * (hodnota je v okfish-pricing-engine `.env` jako MASTER_FEED_URL).
+ */
+export const MASTER_FEED_URL: string = process.env.OKFISH_MASTER_FEED_URL ?? '';
 
 export type CsvRow = Record<string, string>;
 
@@ -126,6 +129,9 @@ export async function loadFeed(opts: {
             const timer = setTimeout(() => controller.abort(), 300_000);
             try {
                 // GET, nic jiného. Read-only operace na veřejné URL.
+                if (!MASTER_FEED_URL) {
+                    throw new Error('OKFISH_MASTER_FEED_URL není nastavené — URL feedu se do repa nepíše.');
+                }
                 const res = await fetch(MASTER_FEED_URL, { method: 'GET', signal: controller.signal });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const text = await res.text();
