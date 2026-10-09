@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-09
 **Base commit:** `200dbf4d718931d0d227ecf25a5b1468bbef175f` (`L-Code-Dynamics-Dev/nexus`, `main`)
-**Audit changes:** working branch based on that commit; exact commit recorded in final after commit.
+**Audit implementation commit:** `7a3ef27a7429bb2f063f83acf269f5c72a0ea341` on `audit/anastasia-comprehensive-2026-10-09`; documentation-only CI report update follows.
 **Environment:** macOS 12.6.0, Node/npm from local toolchain. No production credentials or remote writes used.
 
 ## Commands run
@@ -14,7 +14,7 @@
 | `npx tsc --noEmit -p tests/workers/tsconfig.json` | PASS. |
 | `npm test` after boundary fixes and dependency updates | PASS — 77 files, 1014 tests. |
 | `npx vitest run tests/unit/WorkerBoundary.test.ts` | PASS — 5 focused tests. |
-| `npm run test:workers` | BLOCKED — workerd refuses this machine's macOS 12.6.0; requires macOS 13.5+ or supported Linux. No worker tests ran. |
+| `npm run test:workers` | BLOCKED locally — workerd requires macOS 13.5+ or supported Linux. PASS in both PR GitHub Actions runs, including real workerd/D1 suite. |
 | `npx wrangler deploy --dry-run --env production` | PASS — bundle 127.95 KiB (34.64 KiB gzip); resolves Worker, DO and D1 bindings. Dry-run only, no deployment. |
 | `npm audit --omit=dev` after upgrade | PASS — 0 production dependency advisories. |
 | `npm audit` after upgrades | PASS — 0 advisories across the full dependency graph; added CI audit gate. |
@@ -30,5 +30,5 @@ Updated `csv-parse` from 5.5.6 to 7.0.3 (major update required to resolve the pr
 - Reproduce Node/type/dependency checks with commands above after `npm ci`.
 - Run `npm run test:workers` on CI's Ubuntu worker or macOS 13.5+ to verify actual workerd and D1 behavior after these changes.
 - `wrangler deploy --dry-run` proves bundling/config parsing only. Placeholder D1 identifiers mean this is not evidence that an actual production environment is configured.
-- GitHub Actions for base commit `200dbf4` reports Success: Node and Workers/D1 jobs both passed (run triggered 2026-09-24). That result applies only to the base commit, not this audit branch.
+- GitHub Actions passed for both push and pull-request runs on the audit branch: [push run](https://github.com/L-Code-Dynamics-Dev/nexus/actions/runs/37876233932) and [pull-request run](https://github.com/L-Code-Dynamics-Dev/nexus/actions/runs/37876245153). Each reports Node and Workers/D1 jobs passed. The base commit also had a successful run on 2026-09-24.
 - No PostgreSQL migration/restore, authenticated storefront API, or payment acceptance test exists at this baseline.
