@@ -6,7 +6,10 @@ Jednotná platforma nahrazující roztříštěné projekty (Pricing Engine, Saf
 
 ---
 
-## Stav k 2026-09-07 (měřeno, ne odhadnuto)
+## Historický stav k 2026-09-07 (neaktuální)
+
+> Tento snapshot a níže uvedený seznam blokátorů jsou historické. Aktuální audit cílového upstream `main` (`200dbf4d718931d0d227ecf25a5b1468bbef175f`, 2026-10-09), ověřené testy a požadavky ANASTASIA jsou v [docs/audit/REPOSITORY_AUDIT.md](docs/audit/REPOSITORY_AUDIT.md) a souvisejících auditních dokumentech. Medusa/PostgreSQL commerce backend v tomto commitu není.
+
 
 | Metrika | Hodnota |
 |---|---|
@@ -154,20 +157,14 @@ Kam co patří:
 
 ---
 
-## Známé blokátory
+## Aktuální blokátory (audit 2026-10-09)
 
-Detail v `PROGRESS_LOG.md`.
-
-1. **Workers/D1 testy lokálně nespustitelné** — macOS 12.7.6 vs. požadavek workerd 13.5+. Ověřitelné jen na CI. Hardwarový strop, ne konfigurace.
-2. **Nic není nasazené.** `database_id` / `preview_database_id` ve `wrangler.jsonc` jsou placeholdery. D1 databáze `nexus-voucher-dev` a `nexus-voucher` fyzicky neexistují.
-3. **Hardcoded tenant** — `domains/pricing/createNexusPricingCalculator.ts:62` má `tenantId: 'ten_1'`. Porušuje pravidlo "tenant-scoped od prvního řádku". P0.2.
-4. **Pricing čte filesystem** — `createNexusPricingCalculator.ts:56` volá `fs.readFileSync` na `policy-v1.json`. Ve Workeru to nikdy nepoběží; potřeba `PricingConfigurationProvider`. P0.3.
-5. **Connector Layer bez implementace** — `Connector.ts` neimplementuje nikdo, `connectors/erp-generic/` a `connectors/custom/` jsou prázdné.
-6. **`OmegaExecutor` neověřený proti reálnému Windows agentovi** — 9/9 sanity testů proti mock skriptům, žádný běh proti skutečnému `AkciaOmega.bat`.
-7. **Voucher Fáze B čeká** — Shoptet injector a validace instalace se nezačínají, dokud není hotové P0/P1 (rozhodnutí Lucky 2026-09-07).
-8. **Větev `chore/vitest-4-upgrade` nemergovaná do `main`** — veškerá práce od 6. 9. sedí tam.
-
----
+1. **Lokální Workerd/D1 testy** — testovací runtime vyžaduje macOS 13.5+ nebo podporovaný Linux; tento auditní počítač má macOS 12.6. CI worker job běží na Ubuntu.
+2. **Deployment není nakonfigurován** — `wrangler.jsonc` má placeholder D1 ID pro dev i production; produkční Worker nebyl nasazen ani ověřen.
+3. **ANASTASIA commerce není v repozitáři implementováno** — chybí Medusa v2, PostgreSQL, katalog/checkout/objednávky/platby a jejich API.
+4. **Chybí identita a klientské procesy** — zákaznické účty, knihovna a oprávnění, rezervace, administrace i autorizované doručování placených médií nejsou implementovány.
+5. **Dependency audit** — advisory nálezy z výchozího lockfile byly opraveny aktualizací závislostí; současný `npm audit` je čistý.
+6. **Provozní připravenost nebyla ověřena** — chybí přístup k produkční konfiguraci, zálohám, monitoringu, existujícímu e-shop exportu a staging integracím.
 
 ## Pravidla (z master promptu)
 

@@ -2,12 +2,9 @@
 // PŘEVZAT z ~/shoptet-cart-bypass-poc/src/worker.js, přepsán do TS.
 //
 // ZMĚNY OPROTI PoC:
-//   1. PoC vrací `Access-Control-Allow-Origin: *` natvrdo. Tady je origin
-//      volitelně omezitelný přes `ALLOWED_ORIGINS` -- validační endpoint
-//      prozrazuje zůstatek platidla, takže wildcard je vědomé rozhodnutí
-//      per tenant, ne default bez rozmyslu. Bez konfigurace se chová jako
-//      PoC (`*`), protože Shoptet šablona běží na doméně e-shopu a
-//      request nenese cookies (`credentials` se nepoužívají).
+//   1. CORS je povolený pouze pro explicitně nakonfigurované originy.
+//      Chybějící nebo prázdná konfigurace nic nepovolí. Wildcard by
+//      zpřístupnil voucher balance/token každému webu.
 //   2. `Vary: Origin` -- bez něj by cache vrátila odpověď s cizím
 //      `Allow-Origin` hlavičkou.
 //   3. Structured logging (master rule "chyby čitelné bez dolování"):
@@ -118,7 +115,12 @@ export function jsonError(code: ErrorCode, message: string, status: number): Res
 export function withCors(response: Response, env: { ALLOWED_ORIGINS?: string }, origin: string | null): Response {
     const headers = new Headers(response.headers);
 
-    headers.set('Access-Control-Allow-Origin', resolveAllowedOrigin(env.ALLOWED_ORIGINS, origin));
+    const allowedOrigin = resolveAllowedOrigin(env.ALLOWED_ORIGINS, origin);
+    if (allowedOrigin === null) {
+        headers.delete('Access-Control-Allow-Origin');
+    } else {
+        headers.set('Access-Control-Allow-Origin', allowedOrigin);
+    }
     headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     headers.set('Access-Control-Allow-Headers', 'Content-Type, X-Nexus-Signature');
     headers.set('Access-Control-Max-Age', '86400');
@@ -133,28 +135,26 @@ export function withCors(response: Response, env: { ALLOWED_ORIGINS?: string }, 
 }
 
 /**
- * Bez `ALLOWED_ORIGINS` se chová jako PoC (`*`). S allowlistem vrací
- * konkrétní origin, jen když v seznamu je -- jinak `null`, což prohlížeč
- * odmítne. NIKDY nevrací origin, který v allowlistu není, jen proto, že
- * request nějaký poslal.
+ * Bez `ALLOWED_ORIGINS` nebo při prázdné hodnotě CORS nepovolí žádný web.
+ * S allowlistem vrací konkrétní origin, jen když v seznamu je -- jinak
+ * `null`, což prohlížeč odmítne. NIKDY nevrací origin, který v allowlistu
+ * není, jen proto, že request nějaký poslal.
  */
-function resolveAllowedOrigin(allowedOrigins: string | undefined, origin: string | null): string {
-    if (!allowedOrigins || allowedOrigins.trim().length === 0) {
-        return '*';
-    }
+function resolveAllowedOrigin(allowedOrigins: string | undefined, origin: string | null): string | null {
+    if (!allowedOrigins || allowedOrigins.trim().length === 0) return null;
 
     const allowed = allowedOrigins
         .split(',')
         .map((value) => value.trim())
         .filter((value) => value.length > 0);
 
-    if (allowed.includes('*')) {
-        return '*';
-    }
+    // Wildcard explicitně odmítáme; konfigurace s `*` nesmí obejít
+    // požadavek na origin allowlist.
+    if (allowed.includes('*')) return null;
     if (origin !== null && allowed.includes(origin)) {
         return origin;
     }
-    return 'null';
+    return null;
 }
 
 /** Preflight. 204 bez těla, jako v PoC. */

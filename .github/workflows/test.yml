@@ -27,6 +27,8 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - name: Dependency audit
+        run: npm audit --audit-level=moderate
       - name: TypeScript (root)
         run: npx tsc --noEmit
       - name: TypeScript (workers)
