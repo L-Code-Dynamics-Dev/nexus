@@ -1,0 +1,25 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "nexus-kar",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-09",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "kar.l-code-dynamics.com", "custom_domain": true }
+  ],
+  "ratelimits": [
+    {
+      "name": "CHAT_RATE_LIMITER",
+      // Verify this integer is unique in the target Cloudflare account before deploy.
+      "namespace_id": "2026100901",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
+}

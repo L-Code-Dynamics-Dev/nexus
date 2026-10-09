@@ -29,6 +29,10 @@ jobs:
       - run: npm ci
       - name: Dependency audit
         run: npm audit --audit-level=moderate
+      - name: Kár Worker bundle
+        run: npx wrangler deploy --dry-run --config apps/kar/wrangler.jsonc
+      - name: Kár TypeScript
+        run: npm run kar:typecheck
       - name: TypeScript (root)
         run: npx tsc --noEmit
       - name: TypeScript (workers)

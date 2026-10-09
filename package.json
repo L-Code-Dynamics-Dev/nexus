@@ -7,7 +7,11 @@
   "scripts": {
     "test": "vitest run",
     "build": "tsc --noEmit",
-    "test:workers": "vitest run -c vitest.workers.config.ts"
+    "test:workers": "vitest run -c vitest.workers.config.ts",
+    "kar:dev": "wrangler dev --config apps/kar/wrangler.jsonc",
+    "kar:typecheck": "tsc --project apps/kar/tsconfig.json",
+    "kar:deploy:dry-run": "wrangler deploy --dry-run --config apps/kar/wrangler.jsonc",
+    "kar:deploy": "wrangler deploy --config apps/kar/wrangler.jsonc"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.0",
