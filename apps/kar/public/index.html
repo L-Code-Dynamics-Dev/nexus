@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101310" />
+    <meta name="description" content="Kár — AI technický spolupracovník projektu Nexus." />
+    <title>Kár — Nexus</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Kár, domovská stránka">
+          <span class="brand-mark" aria-hidden="true">K</span>
+          <span>KÁR <small>BY NEXUS</small></span>
+        </a>
+        <div class="session"><span class="session-dot"></span><span>Soukromá relace</span></div>
+      </header>
+
+      <section class="intro" aria-labelledby="headline">
+        <p class="eyebrow">L-CODE DYNAMICS · NEXUS ENGINEERING</p>
+        <h1 id="headline">Dobrý den.<br /><em>Co dnes stavíme?</em></h1>
+        <p class="lede">Technický dialog pro skutečný kód, architekturu a bezpečný vývoj Nexusu.</p>
+        <div class="capabilities" aria-label="Schopnosti">
+          <span>ARCHITEKTURA</span><span>CODE REVIEW</span><span>RED TEAM*</span>
+        </div>
+        <p class="scope-note">* Bezpečnostní testování pouze v rozsahu, ke kterému máte oprávnění.</p>
+      </section>
+
+      <section class="chat-panel" aria-label="Konverzace s Kárem">
+        <div class="conversation" id="conversation" aria-live="polite" aria-relevant="additions text">
+          <article class="message assistant">
+            <div class="avatar" aria-hidden="true">K</div>
+            <div class="message-copy">
+              <p class="speaker">KÁR <time>ASISTENT</time></p>
+              <p>Ahoj. Pomůžu ti projít návrh, pochopit kód nebo najít bezpečnější cestu. Zatím odpovídám nad kontextem, který mi pošleš sem.</p>
+            </div>
+          </article>
+        </div>
+        <form class="composer" id="chat-form">
+          <label class="sr-only" for="prompt">Napište zprávu</label>
+          <textarea id="prompt" name="prompt" rows="1" maxlength="8000" placeholder="Napište, co potřebujete vyřešit…" required></textarea>
+          <div class="voice-profile-row">
+            <label class="pepa-roast-setting" id="pepa-roast-setting" hidden for="pepa-roast-enabled">
+              <input id="pepa-roast-enabled" type="checkbox" />
+              KAR_PEPA_ROAST · povolit Pepův roast
+            </label>
+            <label for="personality-profile">OSOBNOST</label>
+            <select id="personality-profile" name="personality-profile">
+              <option value="KAR_STANDARD_CZ">KAR_STANDARD_CZ · standardní</option>
+              <option value="KAR_UNCENSORED_CZ">KAR_UNCENSORED_CZ · sprostej Homer</option>
+            </select>
+            <label for="voice-profile">HLAS KÁRA</label>
+            <select id="voice-profile" name="voice-profile">
+              <option value="KAR_HOMER_CZ">KAR_HOMER_CZ · hlubší, bručivý originální profil</option>
+              <option value="KAR_NORMAL_CZ">KAR_NORMAL_CZ · běžný český hlas</option>
+            </select>
+            <label for="voice-choice">ČESKÝ HLAS</label>
+            <select id="voice-choice" name="voice-choice" aria-label="Hlas dostupný v tomto prohlížeči">
+              <option value="">Automatický výběr</option>
+            </select>
+          </div>
+          <div class="composer-actions">
+            <div class="voice-actions">
+              <button class="icon-button" id="mic-button" type="button" aria-label="Diktovat zprávu" title="Diktovat zprávu">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"></path></svg>
+              </button>
+              <button class="icon-button" id="speak-toggle" type="button" aria-label="Zapnout předčítání odpovědí" aria-pressed="false" title="Předčítat odpovědi">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6l-5 4H4Zm12-1a5 5 0 0 1 0 6m2-9a9 9 0 0 1 0 12"></path></svg>
+              </button>
+            </div>
+            <div class="send-actions"><span class="key-hint">Enter odešle · Shift+Enter nový řádek</span><button class="send-button" type="submit" aria-label="Odeslat zprávu"><span>Odeslat</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13m-5-5 5 5-5 5"></path></svg></button></div>
+          </div>
+        </form>
+      </section>
+
+      <footer class="footer">
+        <span id="voice-note">Profily modelového TTS se nastavují na serveru. Bez něj se použije označená přibližná syntéza prohlížeče; diktování zajišťuje prohlížeč.</span>
+        <span>Model může chybovat. Důležitá rozhodnutí ověřujte.</span>
+      </footer>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/speech-output.js" defer></script>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
