@@ -5,6 +5,11 @@
   "compatibility_date": "2026-10-09",
   "workers_dev": false,
   "preview_urls": false,
+  "vars": {
+    "CF_ACCESS_ISSUER": "https://hlancaric.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "d9ed7a88df3444674d421c61908a2c867645d298c3b5e739cd2d1b8e434a4587",
+    "PUBLIC_ORIGIN": "https://kar.l-code-dynamics.com"
+  },
   "routes": [
     { "pattern": "kar.l-code-dynamics.com", "custom_domain": true }
   ],

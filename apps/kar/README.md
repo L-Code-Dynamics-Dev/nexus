@@ -18,9 +18,6 @@ Cloudflare Worker + static frontend for `kar.l-code-dynamics.com`. This is an in
 3. Configure secrets (values are intentionally not in git):
 
    ```sh
-   npx wrangler secret put CF_ACCESS_ISSUER --config apps/kar/wrangler.jsonc
-   npx wrangler secret put CF_ACCESS_AUD --config apps/kar/wrangler.jsonc
-   npx wrangler secret put PUBLIC_ORIGIN --config apps/kar/wrangler.jsonc
    npx wrangler secret put MODEL_API_URL --config apps/kar/wrangler.jsonc
    npx wrangler secret put MODEL_API_TOKEN --config apps/kar/wrangler.jsonc
    npx wrangler secret put MODEL_ID --config apps/kar/wrangler.jsonc
@@ -36,7 +33,7 @@ Cloudflare Worker + static frontend for `kar.l-code-dynamics.com`. This is an in
    npx wrangler secret put PEPA_ROAST_COOKIE_SECRET --config apps/kar/wrangler.jsonc
    ```
 
-   `CF_ACCESS_ISSUER` is the HTTPS team issuer URL, `CF_ACCESS_AUD` the Access app audience tag, `PUBLIC_ORIGIN` exactly `https://kar.l-code-dynamics.com`, `MODEL_API_URL` the full HTTPS OpenAI-compatible endpoint, `MODEL_API_TOKEN` a dedicated model-serving token (never the Runpod control-plane API key), and `MODEL_ID` the model identifier accepted by that server.
+   `CF_ACCESS_ISSUER` and `PUBLIC_ORIGIN` are non-secret Worker vars already set in `wrangler.jsonc` to `https://hlancaric.cloudflareaccess.com` and `https://kar.l-code-dynamics.com`. Before the first deploy, add `CF_ACCESS_AUD` to that same `vars` object using the audience tag copied from the existing Access app. Do not guess the tag. `MODEL_API_URL` is the full HTTPS OpenAI-compatible endpoint, `MODEL_API_TOKEN` a dedicated model-serving token (never the Runpod control-plane API key), and `MODEL_ID` the model identifier accepted by that server.
 
    Speech settings are optional until a compatible TTS service and original Czech voice profiles are available. `SPEECH_API_URL` is the full HTTPS OpenAI-compatible `/v1/audio/speech` endpoint; the model token and model ID are provider-specific. Configure the two voice IDs to distinct server-authorized profiles. Validate Czech pronunciation and intelligibility before treating either profile as verified. Do not paste actor or dubber recordings without rights.
 
