@@ -479,3 +479,16 @@ jako částečné čerpání, ale zbytek zahazuje.
 
 NEXUS je dnes ~35 %: doménový model ~85 %, testy ~80 %, ale **runtime/deployment 0 %,
 perzistence 0 %, UI 0 %**. Voucher Fáze A je první produkční D1 v repu.
+
+---
+
+## 2026-10-09 — NEXUS / ANASTASIA audit against requested upstream main
+
+Audited target `L-Code-Dynamics-Dev/nexus` commit `200dbf4d718931d0d227ecf25a5b1468bbef175f` in a detached isolated worktree. The local `/Users/lucky/nexus` checkout is a different remote/branch and contains uncommitted user work; it was preserved.
+
+- Added `docs/audit/REPOSITORY_AUDIT.md`, `ANASTASIA_REQUIREMENTS_MATRIX.md`, `IMPLEMENTATION_PLAN.md`, `SECURITY_FINDINGS.md`, `TEST_RESULTS.md`, and `docs/architecture/ANASTASIA_SYSTEM_BOUNDARIES.md`.
+- Closed two verified public-boundary issues: CORS now denies absent/wildcard allowlists; unauthenticated direct voucher issuance was removed from the public router. Focused tests added.
+- This repository baseline contains voucher/worker and domain logic, but not Medusa, PostgreSQL commerce, customer identity/library, checkout/payment, booking, admin, or protected media.
+- Root TypeScript build and Node tests passed after the changes. Workerd/D1 suite cannot run on this machine's macOS 12.6 (requires macOS 13.5+); CI job is configured on Ubuntu.
+- Deployment remains unconfigured: D1 identifiers in `wrangler.jsonc` are placeholders. No production deployment or data operation was performed.
+- Dependency audit found advisories; follow-up status and results are recorded in `docs/audit/TEST_RESULTS.md`.

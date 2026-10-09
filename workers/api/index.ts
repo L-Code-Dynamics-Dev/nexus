@@ -21,7 +21,6 @@
 
 import { ApiError, jsonError, log, preflightResponse, withCors } from './http.js';
 import { handleShoptetWebhook } from './routes/shoptetWebhook.js';
-import { handleIssue } from './routes/issuance.js';
 import { handleRedeem, handleValidate } from './routes/voucher.js';
 import type { Env } from './types.js';
 
@@ -116,12 +115,6 @@ async function route(request: Request, env: Env, url: URL, ctx: ExecutionContext
         case '/api/vouchers/redeem':
             requireMethod(request, 'POST');
             return handleRedeem(request, env);
-
-        // §4 Issuance -- order webhook "zákazník koupil poukaz".
-        // §15: emise NENÍ zdanitelné plnění (MPV) -- viz hlavička routes/issuance.ts.
-        case '/api/vouchers/issue':
-            requireMethod(request, 'POST');
-            return handleIssue(request, env);
 
         // Shoptet webhook -- PŘEPOSLANÝ z okfish Workeru, ne registrovaný
         // přímo. Shoptet dovolí jen jednu URL na event a `order:create` už
