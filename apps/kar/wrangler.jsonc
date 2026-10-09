@@ -7,7 +7,7 @@
   "preview_urls": false,
   "vars": {
     "CF_ACCESS_ISSUER": "https://hlancaric.cloudflareaccess.com",
-    // Populate from the existing Cloudflare Access app before the first deployment.
+    "CF_ACCESS_AUD": "d9ed7a88df3444674d421c61908a2c867645d298c3b5e739cd2d1b8e434a4587",
     "PUBLIC_ORIGIN": "https://kar.l-code-dynamics.com"
   },
   "routes": [
