@@ -5,6 +5,9 @@
   "description": "E-commerce Operating System — unified canonical platform",
   "type": "module",
   "scripts": {
+    "admin:build": "node apps/admin/generate-catalog.cjs && tsc -p apps/admin/tsconfig.json",
+    "admin:dev": "npm run admin:build && node apps/admin/.runtime/apps/admin/server.js",
+    "admin:test": "vitest run tests/admin --maxWorkers=2",
     "test": "vitest run",
     "build": "tsc --noEmit",
     "test:workers": "vitest run -c vitest.workers.config.ts",
