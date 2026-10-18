@@ -7,7 +7,7 @@
 
 ## Verdict
 
-The target repository is a TypeScript domain library plus a Cloudflare Worker focused on digital vouchers. It is **not** a functioning Medusa commerce backend or ANASTASIA customer platform. No PostgreSQL/Medusa app, storefront, customer identity, customer library, checkout, order/payment workflow, booking API, or protected media delivery was found at this commit.
+The target repository is a TypeScript domain library plus a Cloudflare Worker focused on digital vouchers. It is **not** a functioning Medusa commerce backend or complete customer application. No PostgreSQL/Medusa app, storefront, customer identity, customer library, checkout, order/payment workflow, booking API, or protected media delivery was found at this commit.
 
 The target GitHub repository differs from the existing local checkout's configured remote and branch. The requested public target is `L-Code-Dynamics-Dev/nexus`; local `/Users/lucky/nexus` is on `master` with remote `hlancaric-ship-it/nexus` and contains uncommitted changes. Those changes were preserved and are not represented by this audit commit.
 
@@ -18,8 +18,7 @@ The target GitHub repository differs from the existing local checkout's configur
 - Persistence: four D1 migrations, voucher and execution-intent domain persistence. No PostgreSQL config or Medusa migrations.
 - CI: one workflow, `.github/workflows/test.yml`, with Node and workerd jobs. No lint, dependency audit, deployment validation, or end-to-end commerce workflow.
 - No storefront/app or Medusa package exists. `ui/` is not tracked as an application.
-- `STATUS.md` and `STATUS-ANASTASIA-PLAN.md` are absent. `README.md` and `PROGRESS_LOG.md` contain dated historical claims and are not a reliable current status source without commit matching.
-- Public site review is limited to publicly reachable pages: [anastasiaoz.eu](https://anastasiaoz.eu/). Its public page shows a cookie consent layer and commerce navigation; that does not establish the state of its database, checkout, accounts, or payment integrations. The other listed domains and sitemap/robots endpoints could not be inspected with the available browser access.
+- `STATUS.md` is absent. `README.md` and `PROGRESS_LOG.md` contain dated historical claims and are not a reliable current status source without commit matching.
 
 ## Architecture and security findings
 
@@ -37,5 +36,5 @@ The target GitHub repository differs from the existing local checkout's configur
 
 - Implemented in source: deterministic pricing rules and parity tests; voucher domain, D1 persistence, HMAC and DO code; Shoptet read-only adapter; execution intent abstractions.
 - Not equivalent to a service: pricing has no authenticated commerce API integration; Worker router does not expose a pricing or Medusa boundary.
-- Not implemented: Medusa v2, PostgreSQL order/catalog/checkout, customer identity and entitlements, payments, booking, admin, private audio delivery, ANASTASIA API contracts.
+- Not implemented: Medusa v2, PostgreSQL order/catalog/checkout, customer identity and entitlements, payments, booking, admin, private audio delivery.
 - Do not treat historical README test totals, deployment claims, or design documents as current production evidence unless tied to this audited commit and a corresponding deployed environment.

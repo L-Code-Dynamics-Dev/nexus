@@ -482,13 +482,20 @@ perzistence 0 %, UI 0 %**. Voucher Fáze A je první produkční D1 v repu.
 
 ---
 
-## 2026-10-09 — NEXUS / ANASTASIA audit against requested upstream main
+## 2026-10-09 — NEXUS repository audit against requested upstream main
 
 Audited target `L-Code-Dynamics-Dev/nexus` commit `200dbf4d718931d0d227ecf25a5b1468bbef175f` in a detached isolated worktree. The local `/Users/lucky/nexus` checkout is a different remote/branch and contains uncommitted user work; it was preserved.
 
-- Added `docs/audit/REPOSITORY_AUDIT.md`, `ANASTASIA_REQUIREMENTS_MATRIX.md`, `IMPLEMENTATION_PLAN.md`, `SECURITY_FINDINGS.md`, `TEST_RESULTS.md`, and `docs/architecture/ANASTASIA_SYSTEM_BOUNDARIES.md`.
+- Repository audit evidence is retained in `docs/audit/REPOSITORY_AUDIT.md`, `SECURITY_FINDINGS.md`, and `TEST_RESULTS.md`.
 - Closed two verified public-boundary issues: CORS now denies absent/wildcard allowlists; unauthenticated direct voucher issuance was removed from the public router. Focused tests added.
 - This repository baseline contains voucher/worker and domain logic, but not Medusa, PostgreSQL commerce, customer identity/library, checkout/payment, booking, admin, or protected media.
 - Root TypeScript build and Node tests passed after the changes. Workerd/D1 suite cannot run on this machine's macOS 12.6 (requires macOS 13.5+); CI job is configured on Ubuntu.
 - Deployment remains unconfigured: D1 identifiers in `wrangler.jsonc` are placeholders. No production deployment or data operation was performed.
 - Dependency audit found advisories; follow-up status and results are recorded in `docs/audit/TEST_RESULTS.md`.
+
+## 2026-10-18 — Separate platform documentation from customer projects
+
+- Removed customer-specific requirements, target architecture, and implementation roadmap from the platform repository.
+- Removed customer names, website links, and customer branch references from current documentation; retained repository-level security findings and dated test evidence.
+- Runtime, configuration, and public contracts are unchanged. Historical Git commits are outside this cleanup.
+- Validation: scanned all 429 remaining tracked files (names and text) for customer names, domains, and specific product references; checked removed-document references and relative Markdown links in changed documents. All three checks passed; `git diff --check` passed. Full regression runs are delegated to CI.

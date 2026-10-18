@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-09
 **Base commit:** `200dbf4d718931d0d227ecf25a5b1468bbef175f` (`L-Code-Dynamics-Dev/nexus`, `main`)
-**Audit implementation commit:** `7a3ef27a7429bb2f063f83acf269f5c72a0ea341` on `audit/anastasia-comprehensive-2026-10-09`; documentation-only CI report update follows.
+**Audit implementation commit:** `7a3ef27a7429bb2f063f83acf269f5c72a0ea341`; documentation-only CI report update follows.
 **Environment:** macOS 12.6.0, Node/npm from local toolchain. No production credentials or remote writes used.
 
 ## Commands run
