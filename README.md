@@ -8,7 +8,7 @@ Jednotná platforma nahrazující roztříštěné projekty (Pricing Engine, Saf
 
 ## Historický stav k 2026-09-07 (neaktuální)
 
-> Tento snapshot a níže uvedený seznam blokátorů jsou historické. Aktuální audit cílového upstream `main` (`200dbf4d718931d0d227ecf25a5b1468bbef175f`, 2026-10-09), ověřené testy a požadavky ANASTASIA jsou v [docs/audit/REPOSITORY_AUDIT.md](docs/audit/REPOSITORY_AUDIT.md) a souvisejících auditních dokumentech. Medusa/PostgreSQL commerce backend v tomto commitu není.
+> Tento snapshot a níže uvedený seznam blokátorů jsou historické. Aktuální audit cílového upstream `main` (`200dbf4d718931d0d227ecf25a5b1468bbef175f`, 2026-10-09) a ověřené testy jsou v [docs/audit/REPOSITORY_AUDIT.md](docs/audit/REPOSITORY_AUDIT.md) a souvisejících auditních dokumentech. Medusa/PostgreSQL commerce backend v tomto commitu není.
 
 
 | Metrika | Hodnota |
@@ -161,7 +161,7 @@ Kam co patří:
 
 1. **Lokální Workerd/D1 testy** — testovací runtime vyžaduje macOS 13.5+ nebo podporovaný Linux; tento auditní počítač má macOS 12.6. CI worker job běží na Ubuntu.
 2. **Deployment není nakonfigurován** — `wrangler.jsonc` má placeholder D1 ID pro dev i production; produkční Worker nebyl nasazen ani ověřen.
-3. **ANASTASIA commerce není v repozitáři implementováno** — chybí Medusa v2, PostgreSQL, katalog/checkout/objednávky/platby a jejich API.
+3. **Samostatná commerce aplikace není v repozitáři implementována** — chybí Medusa v2, PostgreSQL, katalog/checkout/objednávky/platby a jejich API.
 4. **Chybí identita a klientské procesy** — zákaznické účty, knihovna a oprávnění, rezervace, administrace i autorizované doručování placených médií nejsou implementovány.
 5. **Dependency audit** — advisory nálezy z výchozího lockfile byly opraveny aktualizací závislostí; současný `npm audit` je čistý.
 6. **Provozní připravenost nebyla ověřena** — chybí přístup k produkční konfiguraci, zálohám, monitoringu, existujícímu e-shop exportu a staging integracím.

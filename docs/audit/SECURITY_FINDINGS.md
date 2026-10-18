@@ -12,7 +12,7 @@
 | SEC-04 | P1 | Target deployment config is incomplete. | `wrangler.jsonc` has placeholder D1 IDs; no explicit origin allowlist. Dry-run result is in TEST_RESULTS. No production deployment performed. |
 | SEC-05 | P1 | Shoptet webhook processing acknowledges event before asynchronous order processing and current order fetch/issuance steps remain incomplete. | `workers/api/routes/shoptetWebhook.ts`. Failure is logged, but no durable queue/retry/reconciliation path was verified. |
 | SEC-06 | RESOLVED | Dependency advisories existed in lockfile. | Updated `csv-parse` and compatible Cloudflare/Vitest tooling; full `npm audit` now reports 0. Regression/build checks passed. CI still does not run audit automatically. |
-| SEC-07 | P1 | No customer auth, role-based admin, payment webhook, entitlement enforcement, or private media authorization exists in target. | Verified by inventory; blocks ANASTASIA commerce acceptance. |
+| SEC-07 | P1 | No customer auth, role-based admin, payment webhook, entitlement enforcement, or private media authorization exists in target. | Verified by inventory; consuming commerce applications must supply these controls before exposing protected workflows. |
 | SEC-08 | P2 | Workflow actions use version tags rather than immutable commit SHAs; no deployment/provenance/security scan stage. | `.github/workflows/test.yml`; CI only typechecks and runs Node/workerd test suites. |
 
 ## Controls verified
